@@ -1,3 +1,5 @@
+
+from datetime import date
 # -*- coding: utf-8 -*-
 from typing import Dict, List
 from config import CONFIG
@@ -9,7 +11,7 @@ import validator  # новый модуль
 if __name__ == "__main__":
     gen = Generator(CONFIG)
 
-    # Установим карту кодов для отчётов (из generator.shift_types)
+    # Карта кодов для отчётов
     code_map = {k: v.code for k, v in gen.shift_types.items()}
     report.set_code_map(code_map)
 
@@ -18,7 +20,6 @@ if __name__ == "__main__":
 
     for idx, month_spec in enumerate(CONFIG["months"]):
         ym = month_spec["month_year"]
-        norm = month_spec["norm_hours_month"]
 
         # Генерация месяца с учётом хвоста
         employees, schedule, carry_out = gen.generate_month(
@@ -36,27 +37,15 @@ if __name__ == "__main__":
         else:
             print("[VALIDATOR] OK: базовый паттерн соответствует ожиданиям")
 
-        # Текстовый отчёт в stdout
-        text = report.render_text(ym, norm, CONFIG.get("monthly_overtime_max", 0), employees, schedule)
-        print("" + "="*90)
-        print(text)
-
-        # Сохранение файлов в корень проекта
+        # Сохранение XLSX-сетки и CSV-сетки
         base = f"schedule_{ym}"
         xlsx_path = os.path.join(os.getcwd(), f"{base}.xlsx")
         csv_grid_path = os.path.join(os.getcwd(), f"{base}_grid.csv")
-        csv_long_path = os.path.join(os.getcwd(), f"{base}.csv")
-        json_path = os.path.join(os.getcwd(), f"{base}.json")
-
-        # Excel сетка (или CSV-сетка, если нет openpyxl)
-        path_written = report.write_excel_grid(xlsx_path, ym, employees, schedule)
-        # Дублируем сетку ещё и в CSV на всякий случай
+        report.write_excel_grid(xlsx_path, ym, employees, schedule)
         report.write_csv_grid(csv_grid_path, ym, employees, schedule)
-        # «Длинный» формат для анализа
-        report.write_csv_long(csv_long_path, employees, schedule)
-        report.write_json_long(json_path, employees, schedule)
+        print(f"Сохранено: {xlsx_path}, {csv_grid_path}")
 
-        print(f"Файлы сохранены: {path_written if path_written else csv_grid_path}, {csv_long_path}, {json_path}")
+
 
         # Подготовить хвост (последние 4 дня текущего месяца) для следующего
         prev_tail_by_emp = {}
@@ -72,6 +61,7 @@ if __name__ == "__main__":
             prev_tail_by_emp[e.id] = tail_codes
 
         # Переносим хвосты (N8*) на следующий месяц
+
         carry_in = carry_out
 
     print("Готово.")
