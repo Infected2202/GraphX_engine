@@ -62,6 +62,32 @@ class Generator:
             for k, v in self.cfg["shift_types"].items()
         }
 
+    # ---------- Коды/классификация ----------
+    def code_of(self, shift_key: str) -> str:
+        return self.shift_types[shift_key].code
+
+    @staticmethod
+    def _is_day_code(code: str) -> bool:
+        c = (code or "").upper()
+        return c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}
+
+    @staticmethod
+    def _is_night_code(code: str) -> bool:
+        c = (code or "").upper()
+        return c in {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}
+
+    @staticmethod
+    def _is_off_code(code: str) -> bool:
+        c = (code or "").upper()
+        return c in {"OFF", "VAC8", "VAC0"}
+
+    @staticmethod
+    def _office_from_code(code: str) -> Optional[str]:
+        c = (code or "").upper()
+        if not c or c in {"OFF", "VAC8", "VAC0"}:
+            return None
+        return "A" if c.endswith("A") else ("B" if c.endswith("B") else None)
+
     # ---------- Даты ----------
     @staticmethod
     def ym_to_year_month(ym: str) -> Tuple[int, int]:
@@ -92,25 +118,63 @@ class Generator:
         h = self.stable_hash_int(e.id)
         e.seed4 = h % 4
 
-    # ---------- Ротация ----------
-    def rotation_epoch_for(self, year: int) -> date:
-        policy = self.cfg.get("rotation_epoch_policy", "new_year_reset")
-        if policy == "new_year_reset":
-            return date(year, 1, 1)
-        # fallback: 1-е число текущего месяца
-        return date(year, 1, 1)
+    # ---------- Восстановление состояния на 1-е число ----------
+    # state = (phase0 ∈ {0,1,2,3}, next_day_office_parity ∈ {0(A),1(B)})
+    def _infer_state_from_tail(
+        self,
+        tail_codes: List[str],
+        seed_phase: int,
+        bootstrap_office_parity: int,
+    ) -> Tuple[int, int]:
+        """
+        tail_codes: список кодов (макс 4) последних дней прошл. месяца для сотрудника (по возрастанию дат).
+        Правила:
+         - Последний день был DAY → 1-е число = phase=1 (NIGHT)
+         - Последний день был NIGHT (в т.ч. N4*) → 1-е = phase=2 (OFF)
+         - Если последний был OFF, и предпоследний NIGHT → 1-е = phase=3
+         - Иначе (OFF,OFF …) → 1-е = phase=0 (DAY)
+        next_day_office_parity: строим по последней дневной в хвосте:
+         - если последняя DAY была в офисе A → следующая дневная должна быть B (parity=1)
+         - если была в офисе B → следующая дневная A (parity=0)
+         - если дневных в хвосте нет → используем bootstrap_office_parity
+        """
+        phase0 = seed_phase % 4  # fallback
+        if tail_codes:
+            last = tail_codes[-1].upper()
+            if self._is_day_code(last):
+                phase0 = 1  # после DAY идёт NIGHT
+            elif self._is_night_code(last):
+                phase0 = 2  # после NIGHT идёт OFF
+            else:
+                # OFF/отпуск: смотрим на предпоследний
+                prev = tail_codes[-2].upper() if len(tail_codes) >= 2 else ""
+                if self._is_night_code(prev):
+                    phase0 = 3
+                else:
+                    phase0 = 0
 
-    @staticmethod
-    def phase_for_day(seed4: int, days_from_epoch: int) -> int:
-        # 0: DAY, 1: NIGHT, 2: OFF, 3: OFF
-        return (seed4 + days_from_epoch) % 4
+        # next_day_office_parity
+        next_par = bootstrap_office_parity
+        for c in reversed(tail_codes):
+            if self._is_day_code(c):
+                last_off = self._office_from_code(c)
+                if last_off == "A":
+                    next_par = 1  # после DAY_A следующая дневная в B
+                elif last_off == "B":
+                    next_par = 0  # после DAY_B следующая дневная в A
+                break
+        return phase0, next_par
 
     # ---------- Генерация месяца ----------
-    def generate_month(self, month_spec: Dict, carry_in: Optional[List[Assignment]] = None) -> Tuple[List[Employee], Dict[date, List[Assignment]], List[Assignment]]:
+    def generate_month(
+        self,
+        month_spec: Dict,
+        carry_in: Optional[List[Assignment]] = None,
+        prev_tail_by_emp: Optional[Dict[str, List[str]]] = None,
+    ) -> Tuple[List[Employee], Dict[date, List[Assignment]], List[Assignment]]:
         ym = month_spec["month_year"]
         y, m = self.ym_to_year_month(ym)
-        first, last = self.month_bounds(y, m)
-        epoch = self.rotation_epoch_for(y)
+        _, last = self.month_bounds(y, m)
         norm = int(month_spec["norm_hours_month"]) if month_spec.get("norm_hours_month") else 0
 
         # Сотрудники
@@ -124,21 +188,27 @@ class Generator:
             for rec in self.cfg["employees"]
         ]
         for e in employees:
-            self.seed_employee(e)
+            self.seed_employee(e)  # используем только как fallback фазы
 
         vacations: Dict[str, List[date]] = month_spec.get("vacations", {})
         # Инициализация расписания
         schedule: Dict[date, List[Assignment]] = {d: [] for d in self.iter_month_days(y, m)}
 
-        # Для корректного чередования офиса считаем work_turn (кол-во рабочих выходов) ДО первого числа
-        work_turn_before: Dict[str, int] = {e.id: 0 for e in employees}
-        for e in employees:
-            d = epoch
-            while d < first:
-                ph = self.phase_for_day(e.seed4, (d - epoch).days)
-                if ph in (0, 1):  # DAY or NIGHT
-                    work_turn_before[e.id] += 1
-                d += timedelta(days=1)
+        # Инициализируем состояние по хвосту прошлого месяца (до 4 дней)
+        # Ставим bootstrap: равномерные фазы 0,1,2,3 и начальная дневная A/B пополам по списку
+        phase_map: Dict[str, int] = {}
+        next_day_parity: Dict[str, int] = {}  # 0->A, 1->B
+        for i, e in enumerate(employees):
+            tail = (prev_tail_by_emp or {}).get(e.id, [])
+            seed_phase = i % 4  # равномерно 0,1,2,3 между 8 сотрудниками
+            bootstrap_par = 0 if (i % 2 == 0) else 1
+            p0, par = self._infer_state_from_tail(
+                tail,
+                seed_phase=seed_phase,
+                bootstrap_office_parity=bootstrap_par,
+            )
+            phase_map[e.id] = p0
+            next_day_parity[e.id] = par
 
         # Применяем carry-in (обычно N8* на 1-е число)
         if carry_in:
@@ -146,15 +216,18 @@ class Generator:
                 if a.date in schedule:
                     schedule[a.date] = [x for x in schedule[a.date] if x.employee_id != a.employee_id]
                     schedule[a.date].append(a)
-                # важно: перенос N8* НЕ увеличивает work_turn в этот день (это продолжение ночи прошлого месяца)
+                # перенос N8* не влияет на phase/next_day_parity (это продолжение ночи прошлого месяца)
 
         # Построение шаблона по дням
         carry_out: List[Assignment] = []  # N8* на 1-е след. месяца
 
         for d in self.iter_month_days(y, m):
             for e in employees:
+                ph = phase_map[e.id]
+
                 # если на этот день уже стоит carry-in (например N8A) — пропускаем генерацию
                 if any(a.employee_id == e.id for a in schedule[d]):
+                    phase_map[e.id] = (ph + 1) % 4
                     continue
 
                 # Отпуск приоритетнее шаблона
@@ -162,21 +235,22 @@ class Generator:
                     key = VAC_WD8 if d.weekday() < 5 else VAC_WE0
                     st = self.shift_types[key]
                     schedule[d].append(Assignment(e.id, d, key, st.hours, source="template"))
+                    phase_map[e.id] = (ph + 1) % 4
                     continue
 
-                ph = self.phase_for_day(e.seed4, (d - epoch).days)
-
                 if ph == 0:  # DAY
-                    # Офис зависит от общего числа рабочих выходов ДО сегодняшнего дня
-                    turn = work_turn_before[e.id]
-                    key = DAY_A if (turn % 2 == 0) else DAY_B
+                    # Дневной офис берём из next_day_parity и сразу инвертируем на следующий цикл
+                    office = "A" if next_day_parity[e.id] == 0 else "B"
+                    key = DAY_A if office == "A" else DAY_B
                     st = self.shift_types[key]
                     schedule[d].append(Assignment(e.id, d, key, st.hours, source="template"))
-                    work_turn_before[e.id] += 1
+                    # Следующий цикл: дневной офис противоположный
+                    next_day_parity[e.id] = 1 - next_day_parity[e.id]
 
                 elif ph == 1:  # NIGHT
-                    turn = work_turn_before[e.id]
-                    key = NIGHT_A if (turn % 2 == 0) else NIGHT_B
+                    # Ночь текущего цикла всегда в офисе = текущему next_day_parity (см. вывод в обсуждении)
+                    offc = "A" if next_day_parity[e.id] == 0 else "B"
+                    key = NIGHT_A if offc == "A" else NIGHT_B
                     # Если последняя дата месяца — ставим N4* и готовим N8* в следующий месяц
                     if d == last:
                         key4 = N4_A if key == NIGHT_A else N4_B
@@ -185,15 +259,26 @@ class Generator:
                         # carry-out в след. месяц: N8*
                         key8 = N8_A if key == NIGHT_A else N8_B
                         st8 = self.shift_types[key8]
-                        carry_out.append(Assignment(e.id, date(last.year + (1 if last.month == 12 else 0), (1 if last.month == 12 else last.month + 1), 1), key8, st8.hours, source="template"))
+                        next_year = last.year + (1 if last.month == 12 else 0)
+                        next_month = 1 if last.month == 12 else last.month + 1
+                        carry_out.append(
+                            Assignment(
+                                e.id,
+                                date(next_year, next_month, 1),
+                                key8,
+                                st8.hours,
+                                source="template",
+                            )
+                        )
                     else:
                         st = self.shift_types[key]
                         schedule[d].append(Assignment(e.id, d, key, st.hours, source="template"))
-                    work_turn_before[e.id] += 1
 
                 else:  # OFF
                     st = self.shift_types[OFF]
                     schedule[d].append(Assignment(e.id, d, OFF, st.hours, source="template"))
+
+                phase_map[e.id] = (ph + 1) % 4
 
         # Управление перелимитом часов (короткие смены, приоритет в выходные)
         self.enforce_hours_caps(employees, schedule, norm)
@@ -242,7 +327,3 @@ class Generator:
                 cur = month_hours(e.id)
                 if cur <= monthly_cap and yearly_ok(e, cur):
                     break
-
-    # ---------- Вспомогательное: коды смен ----------
-    def code_of(self, shift_key: str) -> str:
-        return self.shift_types[shift_key].code
