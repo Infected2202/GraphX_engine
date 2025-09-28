@@ -210,6 +210,18 @@ class Generator:
             phase_map[e.id] = p0
             next_day_parity[e.id] = par
 
+        # Разруливаем паритет A/B внутри каждой фазовой корзины (для сотрудников без хвоста)
+        buckets: Dict[int, List[Employee]] = {0: [], 1: [], 2: [], 3: []}
+        for e in employees:
+            buckets[phase_map[e.id]].append(e)
+        for group in buckets.values():
+            idx_free = 0
+            for e in group:
+                if (prev_tail_by_emp or {}).get(e.id):
+                    continue  # паритет восстановлен из хвоста
+                next_day_parity[e.id] = 0 if (idx_free % 2 == 0) else 1
+                idx_free += 1
+
         # Применяем carry-in (обычно N8* на 1-е число)
         if carry_in:
             for a in carry_in:
