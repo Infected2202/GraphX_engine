@@ -52,6 +52,11 @@ def _style_for(code: str):
 
 
 # ------------------- Публичные точки -------------------
+def write_workbook(path: str, ym: str, employees: List, schedule: Dict[date, List]):
+    """Совместимая точка: сохраняет XLSX с единственным листом-сеткой."""
+    return write_excel_grid(path, ym, employees, schedule)
+
+
 def write_excel_grid(path: str, ym: str, employees: List, schedule: Dict[date, List]):
     """Единственный лист Excel: сетка сотрудники×дни, ячейки оформлены по правилам."""
     wb = Workbook()
