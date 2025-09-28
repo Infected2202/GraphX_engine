@@ -58,35 +58,49 @@ def validate_baseline(ym: str, employees: List, schedule: Dict[date, List]) -> L
                 issues.append(f"{ym} {d}: дубль назначения для {name_of[a.employee_id]}")
             seen[a.employee_id] = True
 
-    # 2) Проверка цикла D→N→O→O по токенам (с N4/N8 как N)
-    #    Восстанавливаем фазу из первого дня как-то просто: подгоняем сдвиг по месту.
+    # 2) Локальная проверка переходов цикла D→N→O→O (N4/N8 считаем как N).
+    #    Это устойчиво к «старту» на любом месте цикла и к N8 на 1-е число.
     for e in employees:
         toks = []
         codes = []
         for d in dates:
             a = next(r for r in schedule[d] if r.employee_id == e.id)
-            code = _code_of(a.shift_key)
-            codes.append(code)
-            toks.append(_tok(code))
-        # ищем такой сдвиг s∈[0..3], чтобы максимизировать совпадения с шаблоном D,N,O,O
-        target = ["D", "N", "O", "O"]
-        best_s, best_match = 0, -1
-        for s in range(4):
-            m = sum(1 for i, t in enumerate(toks) if t == target[(i + s) % 4])
-            if m > best_match:
-                best_match, best_s = m, s
-        # теперь проверим полное соответствие
-        for i, t in enumerate(toks):
-            exp = target[(i + best_s) % 4]
+            c = _code_of(a.shift_key)
+            codes.append(c)
+            toks.append(_tok(c))
+
+        # проверяем локальные переходы (без глобального выравнивания)
+        def next_expected(prev_t: str, off_seen: int) -> str:
+            # off_seen: 0 — ни одного O подряд; 1 — один O был
+            if prev_t == "D":
+                return "N"
+            if prev_t == "N":
+                return "O"
+            if prev_t == "O":
+                return "O" if off_seen == 0 else "D"
+            return "D"
+
+        off_seen = 0
+        prev_t = toks[0]
+        # допускаем любой стартовый токен, в т.ч. N (например, N8 на 1-е число)
+        if prev_t == "O":
+            off_seen = 1
+        for i in range(1, len(toks)):
+            exp = next_expected(prev_t, off_seen)
+            t = toks[i]
             if t != exp:
                 issues.append(
                     f"{ym}: {name_of[e.id]} — нарушен цикл на дате {dates[i]} (ожидалось {exp}, есть {t})"
                 )
                 break
+            # обновляем состояние
+            if t == "O":
+                off_seen = min(1, off_seen + 1)
+            else:
+                off_seen = 0
+            prev_t = t
 
-        # 3) Офисы: дневной офис должен чередоваться по циклам, ночной — противоположный дневному в том же цикле
-        #    Восстановим «следующая дневная A/B» из первых дневных.
-        #    Берём первую дневную как точку отсчёта: следующая дневная должна быть в другом офисе и т.д.
+        # 3) Офисы: дневной офис чередуется A/B, ночь — противоположна дневной в том же цикле.
         day_offices = []
         night_offices = []
         for i, (d, code, t) in enumerate(zip(dates, codes, toks)):
@@ -99,20 +113,14 @@ def validate_baseline(ym: str, employees: List, schedule: Dict[date, List]) -> L
             if day_offices[i] == day_offices[i - 1] and day_offices[i] is not None:
                 issues.append(f"{ym}: {name_of[e.id]} — дневные офисы не чередуются около цикла #{i}")
                 break
-        # пара день/ночь в одном цикле: соберём по окнам из 4 дней
-        # сдвиг по лучшему s
-        cyc = 0
+        # проверка «ночь ↔ противоположный офис» — по локальным парам (ищем D затем ближайший N)
         day_off = None
-        for i, (d, code, t) in enumerate(zip(dates, codes, toks)):
-            pos = (i + best_s) % 4
-            if pos == 0 and t == "D":
+        for d, code, t in zip(dates, codes, toks):
+            if t == "D":
                 day_off = _office(code)
-            if pos == 1 and t == "N" and day_off is not None:
+            elif t == "N" and day_off is not None:
                 n_off = _office(code)
                 if n_off == day_off:
-                    issues.append(
-                        f"{ym}: {name_of[e.id]} — ночь не противоположна дневной (цикл {cyc}, дата {d})"
-                    )
-                cyc += 1
+                    issues.append(f"{ym}: {name_of[e.id]} — ночь не противоположна дневной (дата {d})")
                 day_off = None
     return issues
