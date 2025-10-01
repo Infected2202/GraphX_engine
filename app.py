@@ -25,6 +25,12 @@ if __name__ == "__main__":
         # Номер месяца и 1-е число (для carry-in)
         y, m = map(int, ym.split("-"))
         first_day = date(y, m, 1)
+        # Границы месяца (для фильтра отпусков)
+        first_day_cur = first_day
+        # небольшая утилита: получить последний день месяца через генератор
+        last_day_cur = list(gen.iter_month_days(y, m))[-1]
+        # Множество актуальных сотрудников (на случай, если кого-то удалили из конфига)
+        current_emp_ids = {rec["id"] for rec in CONFIG["employees"]}
 
         # --- СИНТЕТИЧЕСКИЙ ХВОСТ ТОЛЬКО ДЛЯ ПЕРВОГО МЕСЯЦА ---
         if idx == 0:
@@ -40,14 +46,31 @@ if __name__ == "__main__":
                 "E07": ["DB", "OFF", "NB", "OFF"],    # → 1 авг OFF (без переноса)  ← фикс
                 "E08": ["DB", "OFF", "OFF", "N4B"],   # → перенос N8B на 1 авг
             }
-            # Готовим carry-in N8* на 1-е число только для тех, у кого 31-го стоит N4*
-            carry_in = [
-                Assignment("E04", first_day, "n8_a", gen.shift_types["n8_a"].hours, source="template"),
-                Assignment("E08", first_day, "n8_b", gen.shift_types["n8_b"].hours, source="template"),
-            ]
+            # Оставляем хвост только для существующих сотрудников
+            prev_tail_by_emp = {eid: tail for eid, tail in prev_tail_by_emp.items() if eid in current_emp_ids}
+            # Готовим carry-in N8* на 1-е число только для тех, кто есть в конфиге
+            carry_in = []
+            if "E04" in current_emp_ids:
+                carry_in.append(Assignment("E04", first_day, "n8_a", gen.shift_types["n8_a"].hours, source="template"))
+            if "E08" in current_emp_ids:
+                carry_in.append(Assignment("E08", first_day, "n8_b", gen.shift_types["n8_b"].hours, source="template"))
+
+        # --- Агрегируем отпуска по всем month_spec: берём только даты, попадающие в текущий месяц ---
+        eff_vacations: dict[str, list[date]] = {}
+        for ms in CONFIG["months"]:
+            vac = ms.get("vacations", {}) or {}
+            for eid, dates in vac.items():
+                for dt in dates:
+                    if first_day_cur <= dt <= last_day_cur:
+                        eff_vacations.setdefault(eid, []).append(dt)
+        # убираем дубликаты и несущ. сотрудников — на всякий случай
+        eff_vacations = {eid: sorted(set(dts)) for eid, dts in eff_vacations.items() if eid in current_emp_ids}
+        # Передаём в генератор модифицированный month_spec с «эффективными» отпусками
+        month_spec_eff = dict(month_spec)
+        month_spec_eff["vacations"] = eff_vacations
 
         employees, schedule, carry_out = gen.generate_month(
-            month_spec,
+            month_spec_eff,
             carry_in=carry_in,
             prev_tail_by_emp=prev_tail_by_emp
         )

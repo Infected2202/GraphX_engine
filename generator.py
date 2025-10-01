@@ -222,9 +222,12 @@ class Generator:
                 next_day_parity[e.id] = 0 if (idx_free % 2 == 0) else 1
                 idx_free += 1
 
-        # Применяем carry-in (обычно N8* на 1-е число)
+        # Применяем carry-in (обычно N8* на 1-е число) — только для актуальных сотрудников
         if carry_in:
+            existing = {e.id for e in employees}
             for a in carry_in:
+                if a.employee_id not in existing:
+                    continue
                 if a.date in schedule:
                     schedule[a.date] = [x for x in schedule[a.date] if x.employee_id != a.employee_id]
                     schedule[a.date].append(a)
