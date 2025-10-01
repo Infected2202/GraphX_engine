@@ -98,8 +98,12 @@ def write_metrics_employees_csv(path: str, employees: List, schedule: Dict[date,
         return "O"
     emp_name = {e.id: e.name for e in employees}
     stats = {e.id: {"hours":0,"D":0,"N":0,"O":0} for e in employees}
+    known_ids = set(stats.keys())
     for d, rows in schedule.items():
         for a in rows:
+            # Пропускаем записи по сотрудникам, которых нет в текущем списке (мог остаться carry-in из прошлого/синтетика)
+            if a.employee_id not in known_ids:
+                continue
             code = _code_of(a.shift_key)
             stats[a.employee_id]["hours"] += a.effective_hours
             stats[a.employee_id][tok(code)] += 1
