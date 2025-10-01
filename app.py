@@ -3,6 +3,8 @@ from pathlib import Path
 from config import CONFIG
 from generator import Generator, Assignment
 import report
+import pairing
+import balancer
 import os
 
 if __name__ == "__main__":
@@ -50,13 +52,54 @@ if __name__ == "__main__":
             prev_tail_by_emp=prev_tail_by_emp
         )
 
-        # Сохранение в каталог reports/
+        # ---------- Аналитика и логи ----------
+        log_lines = []
+        if CONFIG.get("logging", {}).get("enabled", True):
+            if idx == 0:
+                log_lines.append(f"[bootstrap] synthetic prev_tail applied for first month (size={len(prev_tail_by_emp)})")
+            if carry_in:
+                ap = ", ".join([f"{a.employee_id}={gen.code_of(a.shift_key)}" for a in carry_in])
+                log_lines.append(f"[carry_in] {ym}-01: {ap}")
+
+        # ---------- Сохранение в каталог reports/ ----------
         base = f"schedule_{ym}"
         xlsx_path = out_dir / f"{base}.xlsx"
         csv_grid_path = out_dir / f"{base}_grid.csv"
         report.write_workbook(str(xlsx_path), ym, employees, schedule)
         report.write_csv_grid(str(csv_grid_path), ym, employees, schedule)
-        print(f"Сохранено: {xlsx_path}, {csv_grid_path}")
+        # Метрики
+        metrics_emp_path = out_dir / f"{base}_metrics_employees.csv"
+        metrics_days_path = out_dir / f"{base}_metrics_days.csv"
+        report.write_metrics_employees_csv(str(metrics_emp_path), employees, schedule)
+        report.write_metrics_days_csv(str(metrics_days_path), schedule)
+        # Пары (подсчёт, без изменений графика)
+        pairs = pairing.compute_pairs(schedule, gen.code_of)
+        pairs_path = out_dir / f"{base}_pairs.csv"
+        report.write_pairs_csv(str(pairs_path), pairs, employees)
+
+        # Балансировка пар (каркас; обычно выключена)
+        schedule_balanced, ops_log = balancer.apply_pair_breaking(
+            schedule, employees, month_spec.get("norm_hours_month", 0), pairs, CONFIG.get("pair_breaking", {})
+        )
+        if ops_log:
+            log_lines.append("[pair_breaking] operations:")
+            log_lines.extend([f" - {x}" for x in ops_log])
+
+        # Логи (text)
+        if CONFIG.get("logging", {}).get("enabled", True):
+            top_k = CONFIG.get("logging", {}).get("pairs_top", 20)
+            top_show = pairs[:top_k]
+            if top_show:
+                log_lines.append("[pairs.top_day]")
+                for (e1, e2, od, on) in top_show:
+                    log_lines.append(f" {e1}~{e2}: overlap_day={od}, overlap_night={on}")
+            if carry_out:
+                co = ", ".join([f"{a.employee_id}={gen.code_of(a.shift_key)}@{a.date.isoformat()}" for a in carry_out])
+                log_lines.append(f"[carry_out] to next month: {co}")
+            log_path = out_dir / f"{base}_log.txt"
+            report.write_log_txt(str(log_path), log_lines)
+
+        print(f"Сохранено: {xlsx_path}, {csv_grid_path}, {metrics_emp_path}, {metrics_days_path}, {pairs_path}")
 
         # Хвост и переносы для следующего месяца
         # Берём последние 4 даты текущего месяца и собираем хвост по сотрудникам:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 from datetime import date
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import csv
+from collections import defaultdict
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
@@ -84,6 +85,64 @@ def write_csv_grid(path: str, ym: str, employees: List, schedule: Dict[date, Lis
                         break
                 row.append(code)
             w.writerow(row)
+    return path
+
+
+# ------------------- Метрики -------------------
+def write_metrics_employees_csv(path: str, employees: List, schedule: Dict[date, List]):
+    """По сотрудникам: часы/дни/ночи/офф."""
+    def tok(code: str) -> str:
+        c = (code or "").upper()
+        if c in {"DA","DB","M8A","M8B","E8A","E8B"}: return "D"
+        if c in {"NA","NB","N4A","N4B","N8A","N8B"}: return "N"
+        return "O"
+    emp_name = {e.id: e.name for e in employees}
+    stats = {e.id: {"hours":0,"D":0,"N":0,"O":0} for e in employees}
+    for d, rows in schedule.items():
+        for a in rows:
+            code = _code_of(a.shift_key)
+            stats[a.employee_id]["hours"] += a.effective_hours
+            stats[a.employee_id][tok(code)] += 1
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["employee_id","employee","hours_total","days_D","nights_N","offs_O"])
+        for eid in sorted(stats.keys()):
+            s = stats[eid]
+            w.writerow([eid, emp_name[eid], s["hours"], s["D"], s["N"], s["O"]])
+    return path
+
+def write_metrics_days_csv(path: str, schedule: Dict[date, List]):
+    """По датам: количества DA/DB/NA/NB (ядро покрытия)."""
+    counts = []
+    for d in sorted(schedule.keys()):
+        c = {"DA":0,"DB":0,"NA":0,"NB":0}
+        for a in schedule[d]:
+            code = _code_of(a.shift_key).upper()
+            if code in c: c[code] += 1
+        counts.append((d, c))
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["date","DA","DB","NA","NB"])
+        for d, c in counts:
+            w.writerow([d.isoformat(), c["DA"], c["DB"], c["NA"], c["NB"]])
+    return path
+
+# ------------------- Пары -------------------
+def write_pairs_csv(path: str, pairs: List[Tuple[str,str,int,int]], employees: List):
+    """pairs: [(eid1,eid2,overlap_day,overlap_night), ...]"""
+    name = {e.id: e.name for e in employees}
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["emp1_id","emp1","emp2_id","emp2","overlap_day","overlap_night"])
+        for e1, e2, od, on in pairs:
+            w.writerow([e1, name.get(e1,""), e2, name.get(e2,""), od, on])
+    return path
+
+# ------------------- Логи -------------------
+def write_log_txt(path: str, lines: List[str]):
+    with open(path, "w", encoding="utf-8") as f:
+        for ln in lines:
+            f.write(ln.rstrip() + "\n")
     return path
 
 
