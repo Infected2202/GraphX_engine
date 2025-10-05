@@ -244,14 +244,6 @@ class Generator:
                     phase_map[e.id] = (ph + 1) % 4
                     continue
 
-                # Отпуск приоритетнее шаблона
-                if d in vacations.get(e.id, []):
-                    key = VAC_WD8 if d.weekday() < 5 else VAC_WE0
-                    st = self.shift_types[key]
-                    schedule[d].append(Assignment(e.id, d, key, st.hours, source="template"))
-                    phase_map[e.id] = (ph + 1) % 4
-                    continue
-
                 if ph == 0:  # DAY
                     # Дневной офис берём из next_day_parity и сразу инвертируем на следующий цикл
                     office = "A" if next_day_parity[e.id] == 0 else "B"
