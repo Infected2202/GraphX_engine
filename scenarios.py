@@ -187,9 +187,9 @@ def run_scenario(scn: dict, out_root: Path):
         postprocess.apply_vacations(schedule, eff_vacations, gen.shift_types)
 
         # валидации
-        baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen, ignore_vacations=True)
+        baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
         smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=cfg2.get("pair_breaking",{}).get("window_days",6)+2)
-        trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen, days=10)
+        trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
 
         # отчёты
         base = f"{scn['name']}_{ym}"

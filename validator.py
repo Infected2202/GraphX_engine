@@ -52,37 +52,38 @@ def validate_baseline(
     employees,
     schedule: Dict[date, List],
     code_of,
-    gen,
+    gen = None,
     ignore_vacations: bool = True,
 ) -> List[str]:
     """
-    Базовая проверка паттерна, «якорь» = 1-е число месяца.
-    N4/N8 считаем ночными. VAC считаем O (или игнорируем, если ignore_vacations=True).
+    Базовая проверка паттерна с «якорем» = 1-е число текущего месяца.
+    Используем фактический токен на 1-е (с учётом N4/N8→N, VAC→O) как старт цикла D→N→O→O.
+    Это учитывает carry-in и переносы.
     """
     issues: List[str] = []
     dates = sorted(schedule.keys())
     if not dates:
         return issues
     d0 = dates[0]
-    try:
-        epoch = gen.rotation_epoch_for(d0.year)
-    except AttributeError:
-        epoch = date(d0.year, 1, 1)
 
-    actual: Dict[Tuple[date, str], str] = {}
+    actual_tok: Dict[Tuple[date, str], str] = {}
+    actual_code: Dict[Tuple[date, str], str] = {}
     for d in dates:
         for a in schedule[d]:
-            actual[(d, a.employee_id)] = code_of(a.shift_key).upper()
+            code = code_of(a.shift_key).upper()
+            actual_code[(d, a.employee_id)] = code
+            actual_tok[(d, a.employee_id)] = _tok(code)
+
+    cycle = ["D", "N", "O", "O"]
+    idx_of = {"D": 0, "N": 1, "O": 2}
 
     for e in employees:
-        for d in dates:
-            try:
-                ph = gen.phase_for_day(e.seed4, (d - epoch).days)
-            except AttributeError:
-                ph = (e.seed4 + (d - epoch).days) % 4
-            exp = "D" if ph == 0 else ("N" if ph == 1 else "O")
-            code = actual.get((d, e.id), "OFF")
-            act = _tok(code)
+        base_tok = actual_tok.get((d0, e.id), "O")
+        start = idx_of.get(base_tok, 2)
+        for i, d in enumerate(dates):
+            exp = cycle[(start + i) % 4]
+            code = actual_code.get((d, e.id), "OFF")
+            act = actual_tok.get((d, e.id), "O")
             if ignore_vacations and code in {"VAC8", "VAC0"}:
                 continue
             if act != exp:
@@ -112,30 +113,23 @@ def coverage_smoke(ym, schedule, code_of, first_days: int = 8):
     return rows
 
 
-def phase_trace(ym, employees, schedule, code_of, gen, days: int = 10):
+def phase_trace(ym, employees, schedule, code_of, gen = None, days: int = 10):
     dates = sorted(schedule.keys())[:days]
     if not dates:
         return []
-    d0 = dates[0]
-    try:
-        epoch = gen.rotation_epoch_for(d0.year)
-    except AttributeError:
-        epoch = date(d0.year, 1, 1)
+    cycle = ["D", "N", "O", "O"]
+    idx_of = {"D": 0, "N": 1, "O": 2}
     out = []
     for e in employees:
-        exp = []
         act = []
         for d in dates:
-            try:
-                ph = gen.phase_for_day(e.seed4, (d - epoch).days)
-            except AttributeError:
-                ph = (e.seed4 + (d - epoch).days) % 4
-            exp.append("D" if ph == 0 else ("N" if ph == 1 else "O"))
             code = None
             for a in schedule[d]:
                 if a.employee_id == e.id:
                     code = code_of(a.shift_key).upper()
                     break
             act.append(_tok(code or "OFF"))
+        start = idx_of.get(act[0], 2)
+        exp = [cycle[(start + i) % 4] for i in range(len(dates))]
         out.append(f"{e.id}: exp={' '.join(exp)} | act={' '.join(act)}")
     return out
