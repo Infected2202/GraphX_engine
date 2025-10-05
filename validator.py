@@ -74,12 +74,40 @@ def validate_baseline(
             actual_code[(d, a.employee_id)] = code
             actual_tok[(d, a.employee_id)] = _tok(code)
 
-    cycle = ["D", "N", "O", "O"]
-    idx_of = {"D": 0, "N": 1, "O": 2}
+    cycle = ["D", "N", "O", "O"]  # 0,1,2,3
+    idx_of = {"D": 0, "N": 1, "O": 2}  # NB: O может быть и 2, и 3 — разрулим ниже
+
+    def _choose_start(eid: str) -> int:
+        """Выбрать стартовый индекс цикла для сотрудника на 1-е число."""
+        base_tok = actual_tok.get((d0, eid), "O")
+        if base_tok != "O":
+            return idx_of.get(base_tok, 2)
+        # base_tok == "O": ориентируемся на второй день
+        if len(dates) >= 2:
+            d1 = dates[1]
+            next_tok = actual_tok.get((d1, eid), "O")
+            if next_tok == "O":
+                return 2  # O -> O … первый OFF
+            if next_tok == "D":
+                return 3  # O -> D … второй OFF
+        # fallback: выберем старт из {2,3} с минимальным числом несовпадений за месяц
+        best_start, best_mis = 2, 10 ** 9
+        for s in (2, 3):
+            mis = 0
+            for i, d in enumerate(dates):
+                exp = cycle[(s + i) % 4]
+                code = actual_code.get((d, eid), "OFF")
+                act = actual_tok.get((d, eid), "O")
+                if ignore_vacations and code in {"VAC8", "VAC0"}:
+                    continue
+                if act != exp:
+                    mis += 1
+            if mis < best_mis:
+                best_start, best_mis = s, mis
+        return best_start
 
     for e in employees:
-        base_tok = actual_tok.get((d0, e.id), "O")
-        start = idx_of.get(base_tok, 2)
+        start = _choose_start(e.id)
         for i, d in enumerate(dates):
             exp = cycle[(start + i) % 4]
             code = actual_code.get((d, e.id), "OFF")
@@ -129,7 +157,21 @@ def phase_trace(ym, employees, schedule, code_of, gen = None, days: int = 10):
                     code = code_of(a.shift_key).upper()
                     break
             act.append(_tok(code or "OFF"))
-        start = idx_of.get(act[0], 2)
+        if not act:
+            start = 2
+        elif act[0] != "O":
+            start = idx_of.get(act[0], 2)
+        else:
+            if len(act) >= 2 and act[1] == "D":
+                start = 3
+            elif len(act) >= 2 and act[1] == "O":
+                start = 2
+            else:
+                cand = [
+                    (2, sum(1 for i, t in enumerate(act) if t != cycle[(2 + i) % 4])),
+                    (3, sum(1 for i, t in enumerate(act) if t != cycle[(3 + i) % 4])),
+                ]
+                start = min(cand, key=lambda x: x[1])[0]
         exp = [cycle[(start + i) % 4] for i in range(len(dates))]
         out.append(f"{e.id}: exp={' '.join(exp)} | act={' '.join(act)}")
     return out
