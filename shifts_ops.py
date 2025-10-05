@@ -8,25 +8,23 @@ import copy
 N8 = {"N8A", "N8B"}
 N4 = {"N4A", "N4B"}
 DAY = {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}
-NIGHT12 = {"NA", "NB"}
-NIGHT_ANY = {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}
 
 
 def _code(code_of, k):
     return code_of(k).upper()
 
 
-def _emp_seq(schedule, code_of, emp_id: str) -> Tuple[List[date], List[Tuple[date, str, str]]]:
-    """Возвращает (dates, seq[(date, shift_key, CODE)]) только для нужного сотрудника."""
+def _emp_seq(schedule, code_of, emp_id: str) -> Tuple[List[date], List[Tuple[date, object, str]]]:
+    """Возвращает (dates, seq[(date, assignment, CODE)]) только для нужного сотрудника."""
     dates: List[date] = []
-    seq: List[Tuple[date, str, str]] = []
+    seq: List[Tuple[date, object, str]] = []
     for d in sorted(schedule.keys()):
         for a in schedule[d]:
             if a.employee_id != emp_id:
                 continue
             c = _code(code_of, a.shift_key)
             dates.append(d)
-            seq.append((d, a.shift_key, c))
+            seq.append((d, a, c))
             break
     return dates, seq
 
@@ -37,24 +35,6 @@ def _fix_last_day_n4(codes: List[str]) -> None:
     last = codes[-1]
     if last in {"NA", "NB"}:
         codes[-1] = "N4A" if last.endswith("A") else "N4B"
-
-
-def _tok_from_code(c: str) -> str:
-    c = (c or "").upper()
-    if c in DAY:
-        return "D"
-    if c in NIGHT_ANY:
-        return "N"
-    return "O"
-
-
-def _with_office(code: str, office: str | None) -> str:
-    c = (code or "").upper()
-    if office not in {"A", "B"}:
-        return c
-    if c.endswith(("A", "B")):
-        return c[:-1] + office
-    return c
 
 
 def _key_for_code(code: str) -> str:
@@ -78,8 +58,27 @@ def _key_for_code(code: str) -> str:
     }.get(c, "off")
 
 
+def _rot(codes: List[str], i0: int, i1: int, direction: int) -> List[str]:
+    new_codes = codes[:]
+    if direction == +1:
+        head = new_codes[i0]
+        new_codes[i0:i1] = new_codes[i0 + 1 : i1 + 1]
+        new_codes[i1] = head
+    else:
+        tail = new_codes[i1]
+        new_codes[i0 + 1 : i1 + 1] = new_codes[i0:i1]
+        new_codes[i0] = tail
+    return new_codes
+
+
 def shift_phase(schedule, code_of, emp_id: str, direction: int, window: Tuple[date, date]):
-    """Сдвиг фаз без ломки паттерна: переставляем офисы, но сохраняем тип смены."""
+    """
+    Сдвиг окна в начале месяца на ±1 с реальным обновлением shift_key.
+    Запреты:
+     - не трогаем N8* на 1-е,
+     - не создаём N8 внутри месяца,
+     - не создаём N4 вне последнего дня месяца.
+    """
 
     assert direction in (-1, +1)
     dates, seq = _emp_seq(schedule, code_of, emp_id)
@@ -111,28 +110,17 @@ def shift_phase(schedule, code_of, emp_id: str, direction: int, window: Tuple[da
         return schedule, 0, False, f"window-too-narrow({i0},{i1})"
 
     codes = [c for (_, _, c) in seq]
-    toks = [_tok_from_code(c) for c in codes]
-    work_idx = [k for k in range(len(dates)) if i0 <= k <= i1 and toks[k] in {"D", "N"}]
-    if work_idx and codes[0] in N8 and work_idx[0] == 0:
-        work_idx = work_idx[1:]
-    if len(work_idx) <= 1:
-        return schedule, 0, False, f"window-too-narrow({i0},{i1})"
+    new_codes = _rot(codes, i0, i1, direction)
 
-    offices = [codes[k][-1] if codes[k].endswith(("A", "B")) else None for k in work_idx]
-    if direction == +1:
-        new_offices = offices[1:] + offices[:1]
-    else:
-        new_offices = offices[-1:] + offices[:-1]
-
-    new_codes = codes[:]
-    for pos, k in enumerate(work_idx):
-        new_codes[k] = _with_office(new_codes[k], new_offices[pos])
+    for k in range(i0, i1 + 1):
+        if new_codes[k] in N8 and k != 0:
+            new_codes[k] = "NA" if new_codes[k].endswith("A") else "NB"
 
     _fix_last_day_n4(new_codes)
 
     new_sched = copy.deepcopy(schedule)
-    old_hours = 0
     new_hours = 0
+    old_hours = 0
     for idx, d in enumerate(dates):
         if idx == 0 and codes[0] in N8:
             continue
@@ -140,24 +128,25 @@ def shift_phase(schedule, code_of, emp_id: str, direction: int, window: Tuple[da
         new_c = new_codes[idx]
         if old_c == new_c:
             continue
+        _, orig_assn, _ = seq[idx]
+        if orig_assn and orig_assn.employee_id == emp_id:
+            old_hours += int(getattr(orig_assn, "effective_hours", 0))
         for a in new_sched[d]:
             if a.employee_id != emp_id:
                 continue
-            orig_hours = int(getattr(a, "effective_hours", 0))
-            old_hours += orig_hours
             a.shift_key = _key_for_code(new_c)
             a.source = "autofix"
             if new_c in {"DA", "DB", "NA", "NB"}:
-                new_val = 12
+                val = 12
             elif new_c in {"M8A", "M8B", "E8A", "E8B", "N8A", "N8B"}:
-                new_val = 8
+                val = 8
             elif new_c in {"N4A", "N4B"}:
-                new_val = 4
+                val = 4
             else:
-                new_val = 0
-            a.effective_hours = new_val
-            new_hours += new_val
+                val = 0
+            a.effective_hours = val
+            new_hours += val
             break
 
     hours_delta = new_hours - old_hours
-    return new_sched, hours_delta, True, f"ab-rot({direction})[{dates[i0]}..{dates[i1]}]"
+    return new_sched, hours_delta, True, f"rot({direction})[{dates[i0]}..{dates[i1]}]:Δh={hours_delta}"
