@@ -124,3 +124,22 @@ def validate_baseline(ym: str, employees: List, schedule: Dict[date, List]) -> L
                     issues.append(f"{ym}: {name_of[e.id]} — ночь не противоположна дневной (дата {d})")
                 day_off = None
     return issues
+
+# Доп. «мягкая» проверка/лог по первым дням месяца (smoke): DA/DB/A/B-сплит
+def coverage_smoke(ym, schedule, code_of, first_days: int = 8):
+    dates = sorted(schedule.keys())[:first_days]
+    rows = []
+    for d in dates:
+        da = db = na = nb = 0
+        for a in schedule[d]:
+            c = code_of(a.shift_key).upper()
+            if c == "DA":
+                da += 1
+            elif c == "DB":
+                db += 1
+            elif c == "NA":
+                na += 1
+            elif c == "NB":
+                nb += 1
+        rows.append((d.isoformat(), da, db, na, nb))
+    return rows

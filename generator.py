@@ -190,7 +190,6 @@ class Generator:
         for e in employees:
             self.seed_employee(e)  # используем только как fallback фазы
 
-        vacations: Dict[str, List[date]] = month_spec.get("vacations", {})
         # Инициализация расписания
         schedule: Dict[date, List[Assignment]] = {d: [] for d in self.iter_month_days(y, m)}
 
