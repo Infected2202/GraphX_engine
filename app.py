@@ -5,6 +5,9 @@ from generator import Generator, Assignment
 import report
 import pairing
 import balancer
+import postprocess
+import validator
+import coverage as cov
 import os
 
 if __name__ == "__main__":
@@ -16,6 +19,8 @@ if __name__ == "__main__":
 
     carry_in = []           # переносы N8* на 1-е число
     prev_tail_by_emp = {}   # синтетический хвост для первого месяца
+    # анти-соло счётчик по сотрудникам (копим между месяцами в рамках одного запуска)
+    solo_months_counter = {}
 
     out_dir = Path(os.getcwd()) / "reports"
     out_dir.mkdir(exist_ok=True)
@@ -75,6 +80,18 @@ if __name__ == "__main__":
             prev_tail_by_emp=prev_tail_by_emp
         )
 
+        # ---- Балансировка пар (safe-mode в начале месяца) ----
+        pairs = pairing.compute_pairs(schedule, gen.code_of)
+        schedule_balanced, ops_log, solo_after = balancer.apply_pair_breaking(
+            schedule, employees, month_spec_eff.get("norm_hours_month", 0),
+            pairs, CONFIG.get("pair_breaking", {}), gen.code_of, solo_months_counter
+        )
+        if CONFIG.get("pair_breaking", {}).get("enabled", False):
+            schedule = schedule_balanced
+
+        # ---- Пост-перекраска отпусков (0/8ч, не влияет на паттерн) ----
+        postprocess.apply_vacations(schedule, eff_vacations, gen.shift_types)
+
         # ---------- Аналитика и логи ----------
         log_lines = []
         if CONFIG.get("logging", {}).get("enabled", True):
@@ -83,6 +100,27 @@ if __name__ == "__main__":
             if carry_in:
                 ap = ", ".join([f"{a.employee_id}={gen.code_of(a.shift_key)}" for a in carry_in])
                 log_lines.append(f"[carry_in] {ym}-01: {ap}")
+            if CONFIG.get("pair_breaking", {}).get("enabled", False):
+                log_lines.append("[pair_breaking.apply]")
+                if ops_log:
+                    log_lines.extend([f" - {x}" for x in ops_log])
+                else:
+                    log_lines.append(" - no-ops")
+                # smoke по первым дням
+                smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=CONFIG.get("pair_breaking", {}).get("window_days", 6) + 2)
+                log_lines.append("[coverage.smoke.first-days]")
+                for row in smoke:
+                    log_lines.append(f" {row[0]}: DA={row[1]} DB={row[2]} NA={row[3]} NB={row[4]}")
+            # baseline валидация с учётом N4/N8 и игнором VAC
+            baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
+            if baseline_issues:
+                log_lines.append("[validator.baseline.issues]")
+                log_lines.extend([f" - {x}" for x in baseline_issues])
+            # диагностический трейс фазы (первые 10 дней)
+            trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
+            if trace:
+                log_lines.append("[diagnostics.phase_trace.first10]")
+                log_lines.extend([f" {ln}" for ln in trace])
 
         # ---------- Сохранение в каталог reports/ ----------
         base = f"schedule_{ym}"
@@ -95,18 +133,10 @@ if __name__ == "__main__":
         metrics_days_path = out_dir / f"{base}_metrics_days.csv"
         report.write_metrics_employees_csv(str(metrics_emp_path), employees, schedule)
         report.write_metrics_days_csv(str(metrics_days_path), schedule)
-        # Пары (подсчёт, без изменений графика)
+        # Пары (после возможного баланса)
         pairs = pairing.compute_pairs(schedule, gen.code_of)
         pairs_path = out_dir / f"{base}_pairs.csv"
         report.write_pairs_csv(str(pairs_path), pairs, employees)
-
-        # Балансировка пар (каркас; обычно выключена)
-        schedule_balanced, ops_log = balancer.apply_pair_breaking(
-            schedule, employees, month_spec.get("norm_hours_month", 0), pairs, CONFIG.get("pair_breaking", {})
-        )
-        if ops_log:
-            log_lines.append("[pair_breaking] operations:")
-            log_lines.extend([f" - {x}" for x in ops_log])
 
         # Логи (text)
         if CONFIG.get("logging", {}).get("enabled", True):
@@ -138,5 +168,15 @@ if __name__ == "__main__":
                         break
             prev_tail_by_emp[e.id] = codes
         carry_in = carry_out
+
+        # ---- Анти-соло счётчик (по месяцу) ----
+        # считаем «соло-дни» в этом месяце и накапливаем «соло-месяцы»
+        solo_days = cov.solo_days_by_employee(schedule, gen.code_of)
+        solo_emp_ids = {eid for eid, cnt in solo_days.items() if cnt > 0}
+        for e in employees:
+            if e.id in solo_emp_ids:
+                solo_months_counter[e.id] = solo_months_counter.get(e.id, 0) + 1
+            else:
+                solo_months_counter.setdefault(e.id, 0)
 
     print("Готово.")

@@ -118,6 +118,26 @@ class Generator:
         h = self.stable_hash_int(e.id)
         e.seed4 = h % 4
 
+    # ---------- Эпоха ротации (якорь цикла) ----------
+    def rotation_epoch_for(self, year: int) -> date:
+        """
+        Возвращает дату-«якорь» для расчёта фаз.
+        По умолчанию — 1 января указанного года (политика: new_year_reset).
+        """
+        policy = self.cfg.get("rotation_epoch_policy", "new_year_reset")
+        if policy == "new_year_reset":
+            return date(year, 1, 1)
+        # fallback на случай других политик — используем 1 января
+        return date(year, 1, 1)
+
+    # ---------- Фаза цикла ----------
+    @staticmethod
+    def phase_for_day(seed4: int, days_from_epoch: int) -> int:
+        """
+        Фазы 0..3 соответствуют: 0=Day, 1=Night, 2=Off, 3=Off.
+        """
+        return (seed4 + days_from_epoch) % 4
+
     # ---------- Восстановление состояния на 1-е число ----------
     # state = (phase0 ∈ {0,1,2,3}, next_day_office_parity ∈ {0(A),1(B)})
     def _infer_state_from_tail(
@@ -190,7 +210,6 @@ class Generator:
         for e in employees:
             self.seed_employee(e)  # используем только как fallback фазы
 
-        vacations: Dict[str, List[date]] = month_spec.get("vacations", {})
         # Инициализация расписания
         schedule: Dict[date, List[Assignment]] = {d: [] for d in self.iter_month_days(y, m)}
 
@@ -239,17 +258,10 @@ class Generator:
         for d in self.iter_month_days(y, m):
             for e in employees:
                 ph = phase_map[e.id]
+                # ВНИМАНИЕ: отпуск НЕ применяется здесь. Перекраска делается postprocess'ом.
 
                 # если на этот день уже стоит carry-in (например N8A) — пропускаем генерацию
                 if any(a.employee_id == e.id for a in schedule[d]):
-                    phase_map[e.id] = (ph + 1) % 4
-                    continue
-
-                # Отпуск приоритетнее шаблона
-                if d in vacations.get(e.id, []):
-                    key = VAC_WD8 if d.weekday() < 5 else VAC_WE0
-                    st = self.shift_types[key]
-                    schedule[d].append(Assignment(e.id, d, key, st.hours, source="template"))
                     phase_map[e.id] = (ph + 1) % 4
                     continue
 

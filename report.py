@@ -89,46 +89,58 @@ def write_csv_grid(path: str, ym: str, employees: List, schedule: Dict[date, Lis
 
 
 # ------------------- Метрики -------------------
-def write_metrics_employees_csv(path: str, employees: List, schedule: Dict[date, List]):
-    """По сотрудникам: часы/дни/ночи/офф."""
-    def tok(code: str) -> str:
-        c = (code or "").upper()
-        if c in {"DA","DB","M8A","M8B","E8A","E8B"}: return "D"
-        if c in {"NA","NB","N4A","N4B","N8A","N8B"}: return "N"
-        return "O"
-    emp_name = {e.id: e.name for e in employees}
-    stats = {e.id: {"hours":0,"D":0,"N":0,"O":0} for e in employees}
-    known_ids = set(stats.keys())
-    for d, rows in schedule.items():
-        for a in rows:
-            # Пропускаем записи по сотрудникам, которых нет в текущем списке (мог остаться carry-in из прошлого/синтетика)
-            if a.employee_id not in known_ids:
-                continue
-            code = _code_of(a.shift_key)
-            stats[a.employee_id]["hours"] += a.effective_hours
-            stats[a.employee_id][tok(code)] += 1
+def write_metrics_days_csv(path: str, schedule: Dict[date, List]):
+    """По датам: количества DA/DB/NA/NB (учитываем N4/N8 как ночные)."""
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["employee_id","employee","hours_total","days_D","nights_N","offs_O"])
+        w.writerow(["date", "DA", "DB", "NA", "NB"])
+        for d in sorted(schedule.keys()):
+            da = db = na = nb = 0
+            for a in schedule[d]:
+                code = _code_of(a.shift_key).upper()
+                if code == "DA":
+                    da += 1
+                elif code == "DB":
+                    db += 1
+                elif code in {"NA", "N4A", "N8A"}:
+                    na += 1
+                elif code in {"NB", "N4B", "N8B"}:
+                    nb += 1
+            w.writerow([d.isoformat(), da, db, na, nb])
+    return path
+
+
+def write_metrics_employees_csv(path: str, employees: List, schedule: Dict[date, List]):
+    """По сотрудникам: суммарные часы и количество D/N/O (VAC → O)."""
+
+    def tok(code: str) -> str:
+        c = (code or "").upper()
+        if c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
+            return "D"
+        if c in {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}:
+            return "N"
+        return "O"
+
+    emp_name = {e.id: e.name for e in employees}
+    stats = {e.id: {"hours": 0, "D": 0, "N": 0, "O": 0} for e in employees}
+    known_ids = set(stats.keys())
+
+    for d, rows in schedule.items():
+        per_emp: Dict[str, Tuple[str, int]] = {}
+        for a in rows:
+            if a.employee_id not in known_ids:
+                continue
+            per_emp[a.employee_id] = (_code_of(a.shift_key), a.effective_hours)
+        for eid, (code, hrs) in per_emp.items():
+            stats[eid]["hours"] += int(hrs)
+            stats[eid][tok(code)] += 1
+
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["employee_id", "employee", "hours_total", "days_D", "nights_N", "offs_O"])
         for eid in sorted(stats.keys()):
             s = stats[eid]
             w.writerow([eid, emp_name[eid], s["hours"], s["D"], s["N"], s["O"]])
-    return path
-
-def write_metrics_days_csv(path: str, schedule: Dict[date, List]):
-    """По датам: количества DA/DB/NA/NB (ядро покрытия)."""
-    counts = []
-    for d in sorted(schedule.keys()):
-        c = {"DA":0,"DB":0,"NA":0,"NB":0}
-        for a in schedule[d]:
-            code = _code_of(a.shift_key).upper()
-            if code in c: c[code] += 1
-        counts.append((d, c))
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["date","DA","DB","NA","NB"])
-        for d, c in counts:
-            w.writerow([d.isoformat(), c["DA"], c["DB"], c["NA"], c["NB"]])
     return path
 
 # ------------------- Пары -------------------

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from datetime import date
 
 # Ожидаем интерфейс schedule: Dict[date, List[Assignment]]
@@ -28,12 +28,14 @@ def _code_of(shift_key: str) -> str:
 
 
 def _tok(code: str) -> str:
+    """D/N/O-токен для baseline-проверки. N4/N8 → N, VAC → O."""
     c = (code or "").upper()
     if c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
         return "D"
     if c in {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}:
         return "N"
-    return "O"  # OFF/VAC*
+    # OFF, VAC8, VAC0 и прочее — считаем «вне цикла» (O)
+    return "O"
 
 
 def _office(code: str) -> str | None:
@@ -45,82 +47,89 @@ def _office(code: str) -> str | None:
     return None
 
 
-def validate_baseline(ym: str, employees: List, schedule: Dict[date, List]) -> List[str]:
+def validate_baseline(
+    ym: str,
+    employees,
+    schedule: Dict[date, List],
+    code_of,
+    gen = None,
+    ignore_vacations: bool = True,
+) -> List[str]:
+    """
+    Базовая проверка паттерна с «якорем» = 1-е число текущего месяца.
+    Используем фактический токен на 1-е (с учётом N4/N8→N, VAC→O) как старт цикла D→N→O→O.
+    Это учитывает carry-in и переносы.
+    """
     issues: List[str] = []
     dates = sorted(schedule.keys())
-    name_of = {e.id: e.name for e in employees}
+    if not dates:
+        return issues
+    d0 = dates[0]
 
-    # 1) Ровно одна запись на сотрудника в сутки
+    actual_tok: Dict[Tuple[date, str], str] = {}
+    actual_code: Dict[Tuple[date, str], str] = {}
     for d in dates:
-        seen = {}
         for a in schedule[d]:
-            if a.employee_id in seen:
-                issues.append(f"{ym} {d}: дубль назначения для {name_of[a.employee_id]}")
-            seen[a.employee_id] = True
+            code = code_of(a.shift_key).upper()
+            actual_code[(d, a.employee_id)] = code
+            actual_tok[(d, a.employee_id)] = _tok(code)
 
-    # 2) Локальная проверка переходов цикла D→N→O→O (N4/N8 считаем как N).
-    #    Это устойчиво к «старту» на любом месте цикла и к N8 на 1-е число.
+    cycle = ["D", "N", "O", "O"]
+    idx_of = {"D": 0, "N": 1, "O": 2}
+
     for e in employees:
-        toks = []
-        codes = []
-        for d in dates:
-            a = next(r for r in schedule[d] if r.employee_id == e.id)
-            c = _code_of(a.shift_key)
-            codes.append(c)
-            toks.append(_tok(c))
-
-        # проверяем локальные переходы (без глобального выравнивания)
-        def next_expected(prev_t: str, off_seen: int) -> str:
-            # off_seen: 0 — ни одного O подряд; 1 — один O был
-            if prev_t == "D":
-                return "N"
-            if prev_t == "N":
-                return "O"
-            if prev_t == "O":
-                return "O" if off_seen == 0 else "D"
-            return "D"
-
-        off_seen = 0
-        prev_t = toks[0]
-        # допускаем любой стартовый токен, в т.ч. N (например, N8 на 1-е число)
-        if prev_t == "O":
-            off_seen = 1
-        for i in range(1, len(toks)):
-            exp = next_expected(prev_t, off_seen)
-            t = toks[i]
-            if t != exp:
+        base_tok = actual_tok.get((d0, e.id), "O")
+        start = idx_of.get(base_tok, 2)
+        for i, d in enumerate(dates):
+            exp = cycle[(start + i) % 4]
+            code = actual_code.get((d, e.id), "OFF")
+            act = actual_tok.get((d, e.id), "O")
+            if ignore_vacations and code in {"VAC8", "VAC0"}:
+                continue
+            if act != exp:
                 issues.append(
-                    f"{ym}: {name_of[e.id]} — нарушен цикл на дате {dates[i]} (ожидалось {exp}, есть {t})"
+                    f"{ym}: Сотрудник {e.id} — нарушен цикл на дате {d.isoformat()} (ожидалось {exp}, есть {act})"
                 )
-                break
-            # обновляем состояние
-            if t == "O":
-                off_seen = min(1, off_seen + 1)
-            else:
-                off_seen = 0
-            prev_t = t
-
-        # 3) Офисы: дневной офис чередуется A/B, ночь — противоположна дневной в том же цикле.
-        day_offices = []
-        night_offices = []
-        for i, (d, code, t) in enumerate(zip(dates, codes, toks)):
-            if t == "D":
-                day_offices.append(_office(code))
-            elif t == "N":
-                night_offices.append(_office(code))
-        # проверка чередования day A/B
-        for i in range(1, len(day_offices)):
-            if day_offices[i] == day_offices[i - 1] and day_offices[i] is not None:
-                issues.append(f"{ym}: {name_of[e.id]} — дневные офисы не чередуются около цикла #{i}")
-                break
-        # проверка «ночь ↔ противоположный офис» — по локальным парам (ищем D затем ближайший N)
-        day_off = None
-        for d, code, t in zip(dates, codes, toks):
-            if t == "D":
-                day_off = _office(code)
-            elif t == "N" and day_off is not None:
-                n_off = _office(code)
-                if n_off == day_off:
-                    issues.append(f"{ym}: {name_of[e.id]} — ночь не противоположна дневной (дата {d})")
-                day_off = None
     return issues
+
+# Доп. «мягкая» проверка/лог по первым дням месяца (smoke): DA/DB/A/B-сплит
+def coverage_smoke(ym, schedule, code_of, first_days: int = 8):
+    """Сводка по первым дням месяца с учётом N4/N8 как ночных."""
+    dates = sorted(schedule.keys())[:first_days]
+    rows = []
+    for d in dates:
+        da = db = na = nb = 0
+        for a in schedule[d]:
+            c = code_of(a.shift_key).upper()
+            if c == "DA":
+                da += 1
+            elif c == "DB":
+                db += 1
+            elif c in {"NA", "N4A", "N8A"}:
+                na += 1
+            elif c in {"NB", "N4B", "N8B"}:
+                nb += 1
+        rows.append((d.isoformat(), da, db, na, nb))
+    return rows
+
+
+def phase_trace(ym, employees, schedule, code_of, gen = None, days: int = 10):
+    dates = sorted(schedule.keys())[:days]
+    if not dates:
+        return []
+    cycle = ["D", "N", "O", "O"]
+    idx_of = {"D": 0, "N": 1, "O": 2}
+    out = []
+    for e in employees:
+        act = []
+        for d in dates:
+            code = None
+            for a in schedule[d]:
+                if a.employee_id == e.id:
+                    code = code_of(a.shift_key).upper()
+                    break
+            act.append(_tok(code or "OFF"))
+        start = idx_of.get(act[0], 2)
+        exp = [cycle[(start + i) % 4] for i in range(len(dates))]
+        out.append(f"{e.id}: exp={' '.join(exp)} | act={' '.join(act)}")
+    return out
