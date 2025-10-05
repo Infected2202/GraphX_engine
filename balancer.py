@@ -24,6 +24,29 @@ def _pair_score(pairs) -> int:
     return sum(p[2] for p in pairs)
 
 
+def _slice_schedule(schedule, w0: date, w1: date):
+    """Срез расписания на окно дат [w0..w1]."""
+    return {d: rows[:] for d, rows in schedule.items() if w0 <= d <= w1}
+
+
+def _coverage_ok_in_window(schedule, code_of, w0: date, w1: date) -> int:
+    """Число дат в окне, где DA+DB ≥ 2 (M8/E8 считаем дневными)."""
+    cnt = 0
+    for d, rows in schedule.items():
+        if not (w0 <= d <= w1):
+            continue
+        da = db = 0
+        for a in rows:
+            c = code_of(a.shift_key).upper()
+            if c in ("DA", "M8A", "E8A"):
+                da += 1
+            if c in ("DB", "M8B", "E8B"):
+                db += 1
+        if (da + db) >= 2:
+            cnt += 1
+    return cnt
+
+
 def apply_pair_breaking(
     schedule,
     employees,
@@ -35,6 +58,7 @@ def apply_pair_breaking(
 ) -> Tuple[object, List[str], List[Tuple[str, int]]]:
     """
     Жадный разрыв пар в начале месяца. Приоритет: сотрудники с «соло»-историей.
+    Приём операции строгий: Δpair < 0, Δsolo ≤ 0 (и в окне), Δcoverage_ok ≥ 0, |Δhours| ≤ hours_budget.
     Возвращает: (schedule', ops_log, solo_days_after)
     """
     ops_log: List[str] = []
@@ -44,6 +68,7 @@ def apply_pair_breaking(
     window_days = int(cfg.get("window_days", 6))
     max_ops = int(cfg.get("max_ops", 4))
     threshold = int(cfg.get("overlap_threshold", 8))
+    hours_budget = int(cfg.get("hours_budget", 0))
 
     dates = sorted(schedule.keys())
     # базовые метрики до правок
@@ -71,31 +96,45 @@ def apply_pair_breaking(
             break
         w0, w1 = _window_for_month(dates, code_of, cur_sched, eid, window_days)
         improved = False
+        base_cov_ok = _coverage_ok_in_window(cur_sched, code_of, w0, w1)
+        base_slice = _slice_schedule(cur_sched, w0, w1)
+        base_solo_win = sum(cov.solo_days_by_employee(base_slice, code_of).values())
         for direction in (+1, -1):
-            test_sched, _, ok, note = shifts_ops.shift_phase(cur_sched, code_of, eid, direction, (w0, w1))
+            test_sched, dh, ok, note = shifts_ops.shift_phase(cur_sched, code_of, eid, direction, (w0, w1))
             if not ok:
+                ops_log.append(f"{eid}: {note} → reject")
                 continue
             # проверим метрики на окне: стало ли лучше по парам и «соло»
             test_pairs = pairing.compute_pairs(test_sched, code_of)
             test_score = _pair_score(test_pairs)
             test_solo = cov.solo_days_by_employee(test_sched, code_of)
-            # критерии приёма:
-            # 1) суммарная «склеенность» уменьшилась
-            # 2) и (если сотрудник «соло») его соло-дней не стало больше
-            cond1 = test_score < base_score
-            cond2 = (eid not in base_solo) or (test_solo.get(eid, 0) <= base_solo.get(eid, 0))
-            # и базовая целесообразность: в окне появилось 2 дневных (A/B) чаще, а не реже
-            if cond1 and cond2:
+            test_cov_ok = _coverage_ok_in_window(test_sched, code_of, w0, w1)
+            test_slice = _slice_schedule(test_sched, w0, w1)
+            test_solo_win = sum(cov.solo_days_by_employee(test_slice, code_of).values())
+            d_pair = test_score - base_score
+            d_solo = test_solo.get(eid, 0) - base_solo.get(eid, 0)
+            d_solo_win = test_solo_win - base_solo_win
+            d_cov = test_cov_ok - base_cov_ok
+            cond1 = d_pair < 0
+            cond2 = (eid not in base_solo) or (d_solo <= 0 and d_solo_win <= 0)
+            cond3 = d_cov >= 0
+            cond4 = abs(dh) <= hours_budget
+            verdict = "ACCEPT" if (cond1 and cond2 and cond3 and cond4) else "REJECT"
+            ops_log.append(
+                f"{eid}: dir={'+' if direction > 0 else '-'} Δpair={d_pair} Δsolo={d_solo}|win={d_solo_win} Δcov={d_cov} Δh={dh} -> {verdict}"
+            )
+            if verdict == "ACCEPT":
                 cur_sched = test_sched
                 base_pairs = test_pairs
                 base_score = test_score
                 base_solo = test_solo
+                base_cov_ok = test_cov_ok
+                base_solo_win = test_solo_win
                 ops += 1
-                ops_log.append(f"{eid}: {note}")
                 improved = True
                 break
         if not improved:
-            ops_log.append(f"{eid}: skip(no-improve)")
+            ops_log.append(f"{eid}: skip(no-accept)")
 
     # финальные соло-метрики
     final_solo = sorted(cov.solo_days_by_employee(cur_sched, code_of).items(), key=lambda kv: kv[0])
