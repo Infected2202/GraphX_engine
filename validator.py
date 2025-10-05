@@ -28,11 +28,11 @@ def _code_of(shift_key: str) -> str:
 
 
 def _tok(code: str) -> str:
-    """D/N/O-токен для baseline-проверки. N4/N8 → N, VAC → O."""
+    """D/N/O-токен для baseline-проверки. N4 → N, N8 трактуем как O."""
     c = (code or "").upper()
     if c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
         return "D"
-    if c in {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}:
+    if c in {"NA", "NB", "N4A", "N4B"}:
         return "N"
     # OFF, VAC8, VAC0 и прочее — считаем «вне цикла» (O)
     return "O"
@@ -57,7 +57,7 @@ def validate_baseline(
 ) -> List[str]:
     """
     Базовая проверка паттерна с «якорем» = 1-е число текущего месяца.
-    Используем фактический токен на 1-е (с учётом N4/N8→N, VAC→O) как старт цикла D→N→O→O.
+    Используем фактический токен на 1-е (с учётом N4→N, N8→O, VAC→O) как старт цикла D→N→O→O.
     Это учитывает carry-in и переносы.
     """
     issues: List[str] = []
@@ -83,10 +83,10 @@ def validate_baseline(
         return None
 
     def _choose_start(eid: str) -> int:
-        """Старт цикла на 1-е: N8* => NIGHT, иначе — по первому не-VAC дню с учётом O2/O3."""
+        """Старт цикла на 1-е: N8* => O2, иначе — по первому не-VAC дню с учётом O2/O3."""
         code_d1 = actual_code.get((d0, eid), "OFF").upper()
         if code_d1 in {"N8A", "N8B"}:
-            return 1
+            return 2
         idx = _first_non_vac_index(eid)
         if idx is None:
             return 2
@@ -124,7 +124,7 @@ def validate_baseline(
 
 # Доп. «мягкая» проверка/лог по первым дням месяца (smoke): DA/DB/A/B-сплит
 def coverage_smoke(ym, schedule, code_of, first_days: int = 8):
-    """Сводка по первым дням месяца с учётом N4/N8 как ночных."""
+    """Сводка по первым дням месяца с учётом N4 как ночных (N8 считаем OFF)."""
     dates = sorted(schedule.keys())[:first_days]
     rows = []
     for d in dates:
@@ -135,9 +135,9 @@ def coverage_smoke(ym, schedule, code_of, first_days: int = 8):
                 da += 1
             elif c == "DB":
                 db += 1
-            elif c in {"NA", "N4A", "N8A"}:
+            elif c in {"NA", "N4A"}:
                 na += 1
-            elif c in {"NB", "N4B", "N8B"}:
+            elif c in {"NB", "N4B"}:
                 nb += 1
         rows.append((d.isoformat(), da, db, na, nb))
     return rows
@@ -171,7 +171,7 @@ def phase_trace(ym, employees, schedule, code_of, gen = None, days: int = 10):
                     day1_code = code_of(a.shift_key).upper()
                     break
             if day1_code in {"N8A", "N8B"}:
-                return 1
+                return 2
             nonvac = None
             for i, code in enumerate(codes):
                 c = (code or "OFF").upper()

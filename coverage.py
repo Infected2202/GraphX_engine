@@ -1,28 +1,45 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from datetime import date
+
+N8 = {"N8A", "N8B"}
+DAYC = {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}
+NIGHT = {"NA", "NB", "N4A", "N4B"}  # N8 на 1-е считаем OFF
 
 
 def _code_of(code_of_fn, shift_key: str) -> str:
     return code_of_fn(shift_key).upper()
 
 
+def _is_carry_in_n8(d: date, code: str) -> bool:
+    return d.day == 1 and (code or "").upper() in N8
+
+
 def per_day_counts(schedule, code_of_fn):
-    """Возвращает по каждой дате счётчики DA/DB/NA/NB (N4/N8 считаем ночными)."""
+    """Возвращает по каждой дате счётчики DA/DB/NA/NB (N4 считаем ночными; N8 на 1-е = OFF)."""
     out = {}
     for d, rows in schedule.items():
         c = {"DA": 0, "DB": 0, "NA": 0, "NB": 0}
         for a in rows:
             c0 = _code_of(code_of_fn, a.shift_key)
-            if c0 == "DA":
-                c["DA"] += 1
-            elif c0 == "DB":
-                c["DB"] += 1
-            elif c0 in {"NA", "N4A", "N8A"}:
-                c["NA"] += 1
-            elif c0 in {"NB", "N4B", "N8B"}:
-                c["NB"] += 1
+            if c0 in DAYC:
+                if c0.endswith("A"):
+                    c["DA"] += 1
+                elif c0.endswith("B"):
+                    c["DB"] += 1
+                continue
+            if c0 in NIGHT:
+                if c0.endswith("A"):
+                    c["NA"] += 1
+                else:
+                    c["NB"] += 1
+                continue
+            if c0 in N8 and not _is_carry_in_n8(d, c0):
+                if c0.endswith("A"):
+                    c["NA"] += 1
+                else:
+                    c["NB"] += 1
         out[d] = c
     return out
 
