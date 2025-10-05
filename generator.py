@@ -213,6 +213,8 @@ class Generator:
         # Инициализация расписания
         schedule: Dict[date, List[Assignment]] = {d: [] for d in self.iter_month_days(y, m)}
 
+        first_day = date(y, m, 1)
+
         # Инициализируем состояние по хвосту прошлого месяца (до 4 дней)
         # Ставим bootstrap: равномерные фазы 0,1,2,3 и начальная дневная A/B пополам по списку
         phase_map: Dict[str, int] = {}
@@ -241,7 +243,9 @@ class Generator:
                 next_day_parity[e.id] = 0 if (idx_free % 2 == 0) else 1
                 idx_free += 1
 
-        # Применяем carry-in (обычно N8* на 1-е число) — только для актуальных сотрудников
+        # Применяем carry-in — только для актуальных сотрудников.
+        # ВАЖНО: если 1-го числа стоит N8*, то это ПРОДОЛЖЕНИЕ ночи прошл. месяца,
+        # и 1-е должно считаться фазой "NIGHT" (phase=1), чтобы далее шли два OFF подряд.
         if carry_in:
             existing = {e.id for e in employees}
             for a in carry_in:
@@ -250,7 +254,16 @@ class Generator:
                 if a.date in schedule:
                     schedule[a.date] = [x for x in schedule[a.date] if x.employee_id != a.employee_id]
                     schedule[a.date].append(a)
-                # перенос N8* не влияет на phase/next_day_parity (это продолжение ночи прошлого месяца)
+                # Если это 1-е число и код N8A/N8B — корректируем стартовую фазу на NIGHT.
+                if a.date == first_day:
+                    code = self.code_of(a.shift_key).upper()
+                    if code in {"N8A", "N8B"}:
+                        # Почему не OFF? Потому что сам факт наличия N8 на 1-е — это вторая часть ночи,
+                        # и "потреблённая" фаза здесь должна быть NIGHT. Дальше генератор инкрементирует
+                        # фазу на +1 для каждого дня (включая день со скипом из-за carry-in),
+                        # что даст корректную цепочку: N (1-е) -> O (2-е) -> O (3-е) -> D (4-е).
+                        phase_map[a.employee_id] = 1  # NIGHT
+                        # паритет дневного офиса не меняем: он касается только DAY и будет применён при первом D
 
         # Построение шаблона по дням
         carry_out: List[Assignment] = []  # N8* на 1-е след. месяца
