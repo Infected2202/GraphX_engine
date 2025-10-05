@@ -130,6 +130,14 @@ class Generator:
         # fallback на случай других политик — используем 1 января
         return date(year, 1, 1)
 
+    # ---------- Фаза цикла ----------
+    @staticmethod
+    def phase_for_day(seed4: int, days_from_epoch: int) -> int:
+        """
+        Фазы 0..3 соответствуют: 0=Day, 1=Night, 2=Off, 3=Off.
+        """
+        return (seed4 + days_from_epoch) % 4
+
     # ---------- Восстановление состояния на 1-е число ----------
     # state = (phase0 ∈ {0,1,2,3}, next_day_office_parity ∈ {0(A),1(B)})
     def _infer_state_from_tail(

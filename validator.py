@@ -76,7 +76,10 @@ def validate_baseline(
 
     for e in employees:
         for d in dates:
-            ph = gen.phase_for_day(e.seed4, (d - epoch).days)
+            try:
+                ph = gen.phase_for_day(e.seed4, (d - epoch).days)
+            except AttributeError:
+                ph = (e.seed4 + (d - epoch).days) % 4
             exp = "D" if ph == 0 else ("N" if ph == 1 else "O")
             code = actual.get((d, e.id), "OFF")
             act = _tok(code)
@@ -123,7 +126,10 @@ def phase_trace(ym, employees, schedule, code_of, gen, days: int = 10):
         exp = []
         act = []
         for d in dates:
-            ph = gen.phase_for_day(e.seed4, (d - epoch).days)
+            try:
+                ph = gen.phase_for_day(e.seed4, (d - epoch).days)
+            except AttributeError:
+                ph = (e.seed4 + (d - epoch).days) % 4
             exp.append("D" if ph == 0 else ("N" if ph == 1 else "O"))
             code = None
             for a in schedule[d]:
