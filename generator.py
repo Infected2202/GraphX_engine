@@ -238,6 +238,7 @@ class Generator:
         for d in self.iter_month_days(y, m):
             for e in employees:
                 ph = phase_map[e.id]
+                # ВНИМАНИЕ: отпуск НЕ применяется здесь. Перекраска делается postprocess'ом.
 
                 # если на этот день уже стоит carry-in (например N8A) — пропускаем генерацию
                 if any(a.employee_id == e.id for a in schedule[d]):

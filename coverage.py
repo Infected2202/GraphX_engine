@@ -9,14 +9,20 @@ def _code_of(code_of_fn, shift_key: str) -> str:
 
 
 def per_day_counts(schedule, code_of_fn):
-    """Возвращает по каждой дате счётчики DA/DB/NA/NB."""
+    """Возвращает по каждой дате счётчики DA/DB/NA/NB (N4/N8 считаем ночными)."""
     out = {}
     for d, rows in schedule.items():
         c = {"DA": 0, "DB": 0, "NA": 0, "NB": 0}
         for a in rows:
             c0 = _code_of(code_of_fn, a.shift_key)
-            if c0 in c:
-                c[c0] += 1
+            if c0 == "DA":
+                c["DA"] += 1
+            elif c0 == "DB":
+                c["DB"] += 1
+            elif c0 in {"NA", "N4A", "N8A"}:
+                c["NA"] += 1
+            elif c0 in {"NB", "N4B", "N8B"}:
+                c["NB"] += 1
         out[d] = c
     return out
 

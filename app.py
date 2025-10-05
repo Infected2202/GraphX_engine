@@ -111,6 +111,16 @@ if __name__ == "__main__":
                 log_lines.append("[coverage.smoke.first-days]")
                 for row in smoke:
                     log_lines.append(f" {row[0]}: DA={row[1]} DB={row[2]} NA={row[3]} NB={row[4]}")
+            # baseline валидация с учётом N4/N8 и игнором VAC
+            baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen, ignore_vacations=True)
+            if baseline_issues:
+                log_lines.append("[validator.baseline.issues]")
+                log_lines.extend([f" - {x}" for x in baseline_issues])
+            # диагностический трейс фазы (первые 10 дней)
+            trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen, days=10)
+            if trace:
+                log_lines.append("[diagnostics.phase_trace.first10]")
+                log_lines.extend([f" {ln}" for ln in trace])
 
         # ---------- Сохранение в каталог reports/ ----------
         base = f"schedule_{ym}"
