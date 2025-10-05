@@ -118,6 +118,18 @@ class Generator:
         h = self.stable_hash_int(e.id)
         e.seed4 = h % 4
 
+    # ---------- Эпоха ротации (якорь цикла) ----------
+    def rotation_epoch_for(self, year: int) -> date:
+        """
+        Возвращает дату-«якорь» для расчёта фаз.
+        По умолчанию — 1 января указанного года (политика: new_year_reset).
+        """
+        policy = self.cfg.get("rotation_epoch_policy", "new_year_reset")
+        if policy == "new_year_reset":
+            return date(year, 1, 1)
+        # fallback на случай других политик — используем 1 января
+        return date(year, 1, 1)
+
     # ---------- Восстановление состояния на 1-е число ----------
     # state = (phase0 ∈ {0,1,2,3}, next_day_office_parity ∈ {0(A),1(B)})
     def _infer_state_from_tail(

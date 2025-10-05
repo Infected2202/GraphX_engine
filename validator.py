@@ -64,7 +64,10 @@ def validate_baseline(
     if not dates:
         return issues
     d0 = dates[0]
-    epoch = gen.rotation_epoch_for(d0.year)
+    try:
+        epoch = gen.rotation_epoch_for(d0.year)
+    except AttributeError:
+        epoch = date(d0.year, 1, 1)
 
     actual: Dict[Tuple[date, str], str] = {}
     for d in dates:
@@ -111,7 +114,10 @@ def phase_trace(ym, employees, schedule, code_of, gen, days: int = 10):
     if not dates:
         return []
     d0 = dates[0]
-    epoch = gen.rotation_epoch_for(d0.year)
+    try:
+        epoch = gen.rotation_epoch_for(d0.year)
+    except AttributeError:
+        epoch = date(d0.year, 1, 1)
     out = []
     for e in employees:
         exp = []
