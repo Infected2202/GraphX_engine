@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import os
 
 from config import CONFIG as BASE_CONFIG
@@ -150,6 +150,7 @@ def run_scenario(scn: dict, out_root: Path):
     prev_tail_by_emp = {}
     carry_in = []
     solo_months_counter: Dict[str,int] = {}
+    prev_pairs_for_month: Optional[List[Tuple[str, str, int, int]]] = None
 
     # 4) по месяцам
     for idx, month_spec in enumerate(cfg2["months"]):
@@ -176,6 +177,7 @@ def run_scenario(scn: dict, out_root: Path):
 
         # балансировка пар (safe-mode в начале месяца)
         pairs_before = pairing.compute_pairs(schedule, gen.code_of)
+        pair_score_before_calc = sum(p[2] for p in pairs_before)
         ret = balancer.apply_pair_breaking(
             schedule,
             employees,
@@ -190,7 +192,7 @@ def run_scenario(scn: dict, out_root: Path):
             pair_score_before, pair_score_after = rest[:2]
         else:
             pair_score_after = sum(p[2] for p in pairing.compute_pairs(schedule_balanced, gen.code_of))
-            pair_score_before = pair_score_after
+            pair_score_before = pair_score_before_calc
         print(
             f"[pairs.score] before={pair_score_before} after={pair_score_after} "
             f"Δ={pair_score_after - pair_score_before}"
@@ -255,6 +257,35 @@ def run_scenario(scn: dict, out_root: Path):
             log_lines.extend([f" {ln}" for ln in trace])
         log_path = out_dir / f"{base}_log.txt"
         report.write_log_txt(str(log_path), log_lines)
+
+        pb_cfg = cfg2.get("pair_breaking", {}) or {}
+        threshold_day = int(pb_cfg.get("overlap_threshold", 8))
+        window_days = int(pb_cfg.get("window_days", 6))
+        max_ops = int(pb_cfg.get("max_ops", 4))
+        hours_budget = int(pb_cfg.get("hours_budget", 0))
+
+        try:
+            curr_days_total = max([p[2] for p in pairs_after] or [0]) or None
+        except Exception:
+            curr_days_total = None
+
+        appended_log_path = report.append_pairs_to_log(
+            out_dir=str(out_dir),
+            ym=base,
+            threshold_day=threshold_day,
+            window_days=window_days,
+            max_ops=max_ops,
+            hours_budget=hours_budget,
+            prev_pairs=prev_pairs_for_month,
+            curr_pairs=pairs_after,
+            curr_days_total=curr_days_total,
+            ops_log=ops_log,
+            pair_score_before=pair_score_before,
+            pair_score_after=pair_score_after,
+        )
+        print(f"[report.pairs->_log] appended: {appended_log_path}")
+
+        prev_pairs_for_month = pairs_after
 
         # хвост → следующий месяц
         prev_tail_by_emp = extract_tail(schedule, employees, gen)

@@ -156,6 +156,7 @@ def write_pairs_csv(path: str, pairs: List[Tuple[str,str,int,int]], employees: L
         for e1, e2, od, on in pairs:
             w.writerow([e1, name.get(e1,""), e2, name.get(e2,""), od, on])
     return path
+# ------------------- Текстовые отчёты по парам -------------------
 
 
 def write_pairs_text_report(
@@ -281,6 +282,115 @@ def write_pairs_text_report(
             f.write(line + "\n")
 
     return path
+
+
+def render_pairs_text_block(
+    *,
+    ym: str,
+    threshold_day: int,
+    window_days: int,
+    max_ops: int,
+    hours_budget: int,
+    prev_pairs: Optional[List[Tuple[str, str, int, int]]],
+    curr_pairs: List[Tuple[str, str, int, int]],
+    curr_days_total: Optional[int],
+    ops_log: List[str],
+    pair_score_before: int,
+    pair_score_after: int,
+) -> str:
+    """Возвращает текстовый блок отчёта по парам (без записи на диск)."""
+
+    def fmt_pairs(lst: List[Tuple[str, str, int, int]], top: int = 10) -> List[str]:
+        return [f" {a}~{b} d{d}/n{n}" for a, b, d, n in lst[:top]]
+
+    prev_excl = pairing.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
+    curr_excl = pairing.exclusive_matching_by_day(curr_pairs, threshold_day=threshold_day)
+
+    def key_of(a: str, b: str) -> str:
+        return f"{a}~{b}" if a < b else f"{b}~{a}"
+
+    prev_set = {key_of(a, b) for a, b, _, _ in prev_excl}
+    curr_set = {key_of(a, b) for a, b, _, _ in curr_excl}
+    retained = sorted(prev_set & curr_set)
+    broken = sorted(prev_set - curr_set)
+    new = sorted(curr_set - prev_set)
+
+    def bucket_counts(lst: List[Tuple[str, str, int, int]]) -> Dict[str, int]:
+        buckets = {"0..3": 0, "4..7": 0, f"{threshold_day}..": 0}
+        for _, _, d, _ in lst:
+            if d <= 3:
+                buckets["0..3"] += 1
+            elif d <= 7:
+                buckets["4..7"] += 1
+            else:
+                buckets[f"{threshold_day}.."] += 1
+        return buckets
+
+    buckets = bucket_counts(curr_excl)
+
+    pct = None
+    if curr_days_total and curr_days_total > 0:
+        pct = int(round(100.0 * threshold_day / curr_days_total))
+
+    lines: List[str] = []
+    lines.append("[pairs.config]")
+    cfg_line = f"threshold_day={threshold_day}d"
+    if pct is not None:
+        cfg_line += f" (≈{pct}%)"
+    cfg_line += f", window_days={window_days}, max_ops={max_ops}, hours_budget={hours_budget}"
+    lines.append(cfg_line)
+    lines.append("")
+
+    if prev_pairs is not None:
+        lines.append("[pairs.prev_month]")
+        lines.append(f"pairs_strong={len(prev_excl)}")
+        lines += fmt_pairs(prev_excl)
+        lines.append("")
+
+    lines.append("[pairs.current_month]")
+    lines.append(f"pairs_strong={len(curr_excl)}")
+    lines += fmt_pairs(curr_excl)
+    lines.append(
+        f"day_overlap buckets: [0..3]={buckets['0..3']}, [4..7]={buckets['4..7']}, [{threshold_day}..]={buckets[f'{threshold_day}..']}"
+    )
+    lines.append("")
+
+    lines.append("[pairs.delta]")
+    lines.append(f"retained={len(retained)}, broken={len(broken)}, new={len(new)}")
+    if retained:
+        lines.append(" retained: " + ", ".join(retained))
+    if broken:
+        lines.append(" broken  : " + ", ".join(broken))
+    if new:
+        lines.append(" new     : " + ", ".join(new))
+    lines.append(f"pair_score: {pair_score_before} → {pair_score_after} (Δ={pair_score_after - pair_score_before})")
+    lines.append("")
+
+    lines.append("[pair_breaking.summary]")
+    accepted = sum(1 for line in ops_log if "-> ACCEPT" in line)
+    lines.append(f"ops_applied≈{accepted}")
+    lines.append("")
+
+    lines.append("[pair_breaking.ops]")
+    lines += ops_log
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def append_pairs_to_log(
+    out_dir: str,
+    ym: str,
+    **kwargs,
+) -> str:
+    """Апендит блок pairs-отчёта в <out_dir>/<ym>_log.txt и возвращает путь."""
+
+    os.makedirs(out_dir, exist_ok=True)
+    log_path = os.path.join(out_dir, f"{ym}_log.txt")
+    block = render_pairs_text_block(ym=ym, **kwargs)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write("\n" + block)
+    return log_path
 
 # ------------------- Логи -------------------
 def write_log_txt(path: str, lines: List[str]):
