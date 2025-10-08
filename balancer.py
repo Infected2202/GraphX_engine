@@ -85,11 +85,10 @@ def apply_pair_breaking(
     Возвращает расписание после правок, лог операций, финальные соло-метрики и pair_score до/после.
     """
     ops_log: List[str] = []
+    entry_score = _pair_score(pairs)
     if not cfg.get("enabled", False):
-        base_pairs = pairing.compute_pairs(schedule, code_of)
-        base_score = _pair_score(base_pairs)
         final_solo = sorted(cov.solo_days_by_employee(schedule, code_of).items(), key=lambda kv: kv[0])
-        return schedule, ops_log, final_solo, base_score, base_score
+        return schedule, ops_log, final_solo, entry_score, entry_score
 
     window_days = int(cfg.get("window_days", 6))
     max_ops = int(cfg.get("max_ops", 4))
@@ -99,8 +98,7 @@ def apply_pair_breaking(
     dates = sorted(schedule.keys())
     # базовые метрики до правок
     base_pairs = pairs
-    base_score = _pair_score(base_pairs)
-    initial_score = base_score
+    base_score = entry_score
     base_solo = cov.solo_days_by_employee(schedule, code_of)
 
     # кандидаты: те, кто в «жёстких» парах, плюс «соло»-сотрудники с наибольшей историей
@@ -173,4 +171,4 @@ def apply_pair_breaking(
     final_solo = sorted(cov.solo_days_by_employee(cur_sched, code_of).items(), key=lambda kv: kv[0])
     final_pairs = pairing.compute_pairs(cur_sched, code_of)
     final_score = _pair_score(final_pairs)
-    return cur_sched, ops_log, final_solo, initial_score, final_score
+    return cur_sched, ops_log, final_solo, entry_score, final_score

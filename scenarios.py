@@ -176,9 +176,24 @@ def run_scenario(scn: dict, out_root: Path):
 
         # балансировка пар (safe-mode в начале месяца)
         pairs_before = pairing.compute_pairs(schedule, gen.code_of)
-        schedule_balanced, ops_log, _solo_after = balancer.apply_pair_breaking(
-            schedule, employees, month_spec_eff.get("norm_hours_month", 0),
-            pairs_before, cfg2.get("pair_breaking", {}), gen.code_of, solo_months_counter
+        ret = balancer.apply_pair_breaking(
+            schedule,
+            employees,
+            month_spec_eff.get("norm_hours_month", 0),
+            pairs_before,
+            cfg2.get("pair_breaking", {}),
+            gen.code_of,
+            solo_months_counter,
+        )
+        schedule_balanced, ops_log, _solo_after, *rest = ret
+        if len(rest) >= 2:
+            pair_score_before, pair_score_after = rest[:2]
+        else:
+            pair_score_after = sum(p[2] for p in pairing.compute_pairs(schedule_balanced, gen.code_of))
+            pair_score_before = pair_score_after
+        print(
+            f"[pairs.score] before={pair_score_before} after={pair_score_after} "
+            f"Δ={pair_score_after - pair_score_before}"
         )
         if cfg2.get("pair_breaking", {}).get("enabled", False):
             schedule = schedule_balanced
