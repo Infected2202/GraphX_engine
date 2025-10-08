@@ -8,6 +8,28 @@ import pairing
 import coverage as cov
 
 
+def _fmt_tape(schedule, code_of, eid: str, w0: date, w1: date) -> str:
+    """Лента по окну дат с токенами и отметкой carry-in N8."""
+
+    days = [d for d in sorted(schedule.keys()) if w0 <= d <= w1]
+    tape: List[str] = []
+    for d in days:
+        code = "OFF"
+        for a in schedule[d]:
+            if a.employee_id == eid:
+                code = code_of(a.shift_key).upper()
+                break
+        tok = "O"
+        if code in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
+            tok = f"D({code[-1]})"
+        elif code in {"NA", "NB", "N4A", "N4B"}:
+            tok = f"N({code[-1]})"
+        elif code in {"N8A", "N8B"}:
+            tok = "N8(OFF)" if d.day == 1 else "N8"
+        tape.append(f"{d.day:02d} {tok}")
+    return ", ".join(tape)
+
+
 def _window_for_month(dates: List[date], code_of, schedule, emp_id: str, window_days: int) -> Tuple[date, date]:
     """Окно в начале месяца. Если на 1-е у сотрудника N8* — стартуем со 2-го."""
     d0 = dates[0]
@@ -55,15 +77,19 @@ def apply_pair_breaking(
     cfg,
     code_of,
     solo_months_counter: Dict[str, int],
-) -> Tuple[object, List[str], List[Tuple[str, int]]]:
+) -> Tuple[object, List[str], List[Tuple[str, int]], int, int]:
     """
-    Жадный разрыв пар в начале месяца. Приоритет: сотрудники с «соло»-историей.
-    Приём операции строгий: Δpair < 0, Δsolo ≤ 0 (и в окне), Δcoverage_ok ≥ 0, |Δhours| ≤ hours_budget.
-    Возвращает: (schedule', ops_log, solo_days_after)
+    Жадный разрыв пар в начале месяца. Приём операции строгий: Δpair < 0, Δsolo ≤ 0 (и в окне),
+    Δcoverage_ok ≥ 0, |Δhours| ≤ hours_budget.
+
+    Возвращает расписание после правок, лог операций, финальные соло-метрики и pair_score до/после.
     """
     ops_log: List[str] = []
     if not cfg.get("enabled", False):
-        return schedule, ops_log, []
+        base_pairs = pairing.compute_pairs(schedule, code_of)
+        base_score = _pair_score(base_pairs)
+        final_solo = sorted(cov.solo_days_by_employee(schedule, code_of).items(), key=lambda kv: kv[0])
+        return schedule, ops_log, final_solo, base_score, base_score
 
     window_days = int(cfg.get("window_days", 6))
     max_ops = int(cfg.get("max_ops", 4))
@@ -74,6 +100,7 @@ def apply_pair_breaking(
     # базовые метрики до правок
     base_pairs = pairs
     base_score = _pair_score(base_pairs)
+    initial_score = base_score
     base_solo = cov.solo_days_by_employee(schedule, code_of)
 
     # кандидаты: те, кто в «жёстких» парах, плюс «соло»-сотрудники с наибольшей историей
@@ -121,9 +148,15 @@ def apply_pair_breaking(
             cond4 = abs(dh) <= hours_budget
             verdict = "ACCEPT" if (cond1 and cond2 and cond3 and cond4) else "REJECT"
             ops_log.append(
-                f"{eid}: dir={'+' if direction > 0 else '-'} Δpair={d_pair} Δsolo={d_solo}|win={d_solo_win} Δcov={d_cov} Δh={dh} -> {verdict}"
+                f"{eid}: dir={'+' if direction > 0 else '-'} "
+                f"window=[{w0.isoformat()}..{w1.isoformat()}] "
+                f"Δpair={d_pair} Δsolo={d_solo}|win={d_solo_win} Δcov={d_cov} Δh={dh} -> {verdict}"
             )
             if verdict == "ACCEPT":
+                before_tape = _fmt_tape(cur_sched, code_of, eid, w0, w1)
+                after_tape = _fmt_tape(test_sched, code_of, eid, w0, w1)
+                ops_log.append(f"  tape.before: {before_tape}")
+                ops_log.append(f"  tape.after : {after_tape}")
                 cur_sched = test_sched
                 base_pairs = test_pairs
                 base_score = test_score
@@ -138,4 +171,6 @@ def apply_pair_breaking(
 
     # финальные соло-метрики
     final_solo = sorted(cov.solo_days_by_employee(cur_sched, code_of).items(), key=lambda kv: kv[0])
-    return cur_sched, ops_log, final_solo
+    final_pairs = pairing.compute_pairs(cur_sched, code_of)
+    final_score = _pair_score(final_pairs)
+    return cur_sched, ops_log, final_solo, initial_score, final_score

@@ -1,8 +1,11 @@
 from __future__ import annotations
 from datetime import date
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import csv
+import os
 from collections import defaultdict
+
+import pairing
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
@@ -152,6 +155,131 @@ def write_pairs_csv(path: str, pairs: List[Tuple[str,str,int,int]], employees: L
         w.writerow(["emp1_id","emp1","emp2_id","emp2","overlap_day","overlap_night"])
         for e1, e2, od, on in pairs:
             w.writerow([e1, name.get(e1,""), e2, name.get(e2,""), od, on])
+    return path
+
+
+def write_pairs_text_report(
+    out_dir: str,
+    ym: str,
+    *,
+    threshold_day: int,
+    window_days: int,
+    max_ops: int,
+    hours_budget: int,
+    prev_pairs: Optional[List[Tuple[str, str, int, int]]],
+    curr_pairs: List[Tuple[str, str, int, int]],
+    prev_days_total: Optional[int],
+    curr_days_total: Optional[int],
+    ops_log: List[str],
+    pair_score_before: int,
+    pair_score_after: int,
+) -> str:
+    """Пишет текстовый отчёт по парам и возвращает путь к файлу."""
+
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{ym}_pairs.txt")
+
+    def fmt_pairs(lst: List[Tuple[str, str, int, int]], top: int = 10) -> List[str]:
+        rows: List[str] = []
+        for e1, e2, d, n in lst[:top]:
+            rows.append(f" {e1}~{e2} d{d}/n{n}")
+        return rows
+
+    prev_excl = pairing.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
+    curr_excl = pairing.exclusive_matching_by_day(curr_pairs, threshold_day=threshold_day)
+
+    def key_of(a: str, b: str) -> str:
+        return f"{a}~{b}" if a < b else f"{b}~{a}"
+
+    prev_set = {key_of(a, b) for a, b, _, _ in prev_excl}
+    curr_set = {key_of(a, b) for a, b, _, _ in curr_excl}
+    retained = sorted(prev_set & curr_set)
+    broken = sorted(prev_set - curr_set)
+    new = sorted(curr_set - prev_set)
+
+    def bucket_counts(lst: List[Tuple[str, str, int, int]]) -> Dict[str, int]:
+        buckets = {"0..3": 0, "4..7": 0, f"{threshold_day}..": 0}
+        for _, _, d, _ in lst:
+            if d <= 3:
+                buckets["0..3"] += 1
+            elif d <= 7:
+                buckets["4..7"] += 1
+            else:
+                buckets[f"{threshold_day}.."] += 1
+        return buckets
+
+    curr_buckets = bucket_counts(curr_excl)
+
+    def by_emp(lst: List[Tuple[str, str, int, int]]) -> Dict[str, Tuple[str, int]]:
+        data: Dict[str, Tuple[str, int]] = {}
+        for a, b, d, _ in lst:
+            data[a] = (b, d)
+            data[b] = (a, d)
+        return data
+
+    prev_emp = by_emp(prev_excl)
+    curr_emp = by_emp(curr_excl)
+
+    with open(path, "w", encoding="utf-8") as f:
+        pct: Optional[int] = None
+        if curr_days_total and curr_days_total > 0:
+            pct = int(round(100.0 * threshold_day / curr_days_total))
+
+        f.write("[pairs.config]\n")
+        f.write(f"threshold_day={threshold_day}d")
+        if pct is not None:
+            f.write(f" (≈{pct}%)")
+        f.write(
+            f", window_days={window_days}, max_ops={max_ops}, hours_budget={hours_budget}\n\n"
+        )
+
+        if prev_pairs is not None:
+            f.write("[pairs.prev_month]\n")
+            f.write(f"pairs_strong={len(prev_excl)}\n")
+            for row in fmt_pairs(prev_excl):
+                f.write(row + "\n")
+            f.write("\n")
+
+        f.write("[pairs.current_month]\n")
+        f.write(f"pairs_strong={len(curr_excl)}\n")
+        for row in fmt_pairs(curr_excl):
+            f.write(row + "\n")
+        f.write(
+            "day_overlap buckets: "
+            f"[0..3]={curr_buckets['0..3']}, [4..7]={curr_buckets['4..7']}, "
+            f"[{threshold_day}..]={curr_buckets[f'{threshold_day}..']}\n\n"
+        )
+
+        f.write("[pairs.delta]\n")
+        f.write(f"retained={len(retained)}, broken={len(broken)}, new={len(new)}\n")
+        if retained:
+            f.write(" retained: " + ", ".join(retained) + "\n")
+        if broken:
+            f.write(" broken  : " + ", ".join(broken) + "\n")
+        if new:
+            f.write(" new     : " + ", ".join(new) + "\n")
+        f.write(
+            f"pair_score: {pair_score_before} → {pair_score_after} (Δ={pair_score_after - pair_score_before})\n\n"
+        )
+
+        f.write("[pairs.by_employee]\n")
+        emp_ids = sorted(set(prev_emp.keys()) | set(curr_emp.keys()))
+        for eid in emp_ids:
+            prev_info = prev_emp.get(eid)
+            curr_info = curr_emp.get(eid)
+            prev_str = f"{prev_info[0]}(d{prev_info[1]})" if prev_info else "-"
+            curr_str = f"{curr_info[0]}(d{curr_info[1]})" if curr_info else "-"
+            f.write(f"{eid}: prev={prev_str}, curr={curr_str}\n")
+        f.write("\n")
+
+        f.write("[pair_breaking.summary]\n")
+        accepted = sum(1 for line in ops_log if "-> ACCEPT" in line)
+        f.write(f"ops_applied≈{accepted}\n\n")
+
+        f.write("[pair_breaking.ops]\n")
+        for line in ops_log:
+            f.write(line + "\n")
+
     return path
 
 # ------------------- Логи -------------------

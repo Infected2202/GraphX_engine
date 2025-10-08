@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 from datetime import date
 
 # schedule: Dict[date, List[Assignment]]
 # Assignment: employee_id, shift_key
+# compute_pairs(schedule, code_of) — уже существует и возвращает [(e1,e2,day_ov,night_ov), ...]
 
 
 def _tok(code: str) -> str:
@@ -46,3 +47,24 @@ def compute_pairs(schedule: Dict[date, List], code_of) -> List[Tuple[str,str,int
     # сортируем по overlap_day убыв., затем по overlap_night
     out.sort(key=lambda t: (t[2], t[3]), reverse=True)
     return out
+
+
+def exclusive_matching_by_day(
+    pairs: List[Tuple[str, str, int, int]],
+    threshold_day: int = 0,
+) -> List[Tuple[str, str, int, int]]:
+    """
+    Жадный эксклюзивный matching: выбираем непересекающиеся пары по дневным пересечениям.
+    """
+
+    cand = [p for p in pairs if p[2] >= threshold_day]
+    cand.sort(key=lambda x: (x[2], x[3]), reverse=True)
+    used: Set[str] = set()
+    res: List[Tuple[str, str, int, int]] = []
+    for e1, e2, d, n in cand:
+        if e1 in used or e2 in used:
+            continue
+        used.add(e1)
+        used.add(e2)
+        res.append((e1, e2, d, n))
+    return res

@@ -21,6 +21,7 @@ if __name__ == "__main__":
     prev_tail_by_emp = {}   # синтетический хвост для первого месяца
     # анти-соло счётчик по сотрудникам (копим между месяцами в рамках одного запуска)
     solo_months_counter = {}
+    prev_pairs_for_report: list | None = None
 
     out_dir = Path(os.getcwd()) / "reports"
     out_dir.mkdir(exist_ok=True)
@@ -81,10 +82,15 @@ if __name__ == "__main__":
         )
 
         # ---- Балансировка пар (safe-mode в начале месяца) ----
-        pairs = pairing.compute_pairs(schedule, gen.code_of)
-        schedule_balanced, ops_log, solo_after = balancer.apply_pair_breaking(
-            schedule, employees, month_spec_eff.get("norm_hours_month", 0),
-            pairs, CONFIG.get("pair_breaking", {}), gen.code_of, solo_months_counter
+        pairs_before = pairing.compute_pairs(schedule, gen.code_of)
+        schedule_balanced, ops_log, solo_after, pair_score_before_pb, pair_score_after_pb = balancer.apply_pair_breaking(
+            schedule,
+            employees,
+            month_spec_eff.get("norm_hours_month", 0),
+            pairs_before,
+            CONFIG.get("pair_breaking", {}),
+            gen.code_of,
+            solo_months_counter,
         )
         if CONFIG.get("pair_breaking", {}).get("enabled", False):
             schedule = schedule_balanced
@@ -135,8 +141,38 @@ if __name__ == "__main__":
         report.write_metrics_days_csv(str(metrics_days_path), schedule)
         # Пары (после возможного баланса)
         pairs = pairing.compute_pairs(schedule, gen.code_of)
+        pair_score_after = sum(p[2] for p in pairs)
         pairs_path = out_dir / f"{base}_pairs.csv"
         report.write_pairs_csv(str(pairs_path), pairs, employees)
+
+        pb_cfg = CONFIG.get("pair_breaking", {})
+        threshold_day = int(pb_cfg.get("overlap_threshold", 8))
+        window_days = int(pb_cfg.get("window_days", 6))
+        max_ops = int(pb_cfg.get("max_ops", 4))
+        hours_budget = int(pb_cfg.get("hours_budget", 0))
+
+        prev_days_total = max([p[2] for p in (prev_pairs_for_report or [])], default=0)
+        prev_days_total = prev_days_total or None
+        curr_days_total = max([p[2] for p in pairs], default=0)
+        curr_days_total = curr_days_total or None
+
+        report_path = report.write_pairs_text_report(
+            out_dir=str(out_dir),
+            ym=ym,
+            threshold_day=threshold_day,
+            window_days=window_days,
+            max_ops=max_ops,
+            hours_budget=hours_budget,
+            prev_pairs=prev_pairs_for_report,
+            curr_pairs=pairs,
+            prev_days_total=prev_days_total,
+            curr_days_total=curr_days_total,
+            ops_log=ops_log,
+            pair_score_before=pair_score_before_pb,
+            pair_score_after=pair_score_after_pb if CONFIG.get("pair_breaking", {}).get("enabled", False) else pair_score_after,
+        )
+        print(f"[report.pairs] written: {report_path}")
+        prev_pairs_for_report = pairs
 
         # Логи (text)
         if CONFIG.get("logging", {}).get("enabled", True):
