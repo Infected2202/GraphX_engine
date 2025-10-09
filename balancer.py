@@ -77,7 +77,7 @@ def apply_pair_breaking(
     cfg,
     code_of,
     solo_months_counter: Dict[str, int],
-) -> Tuple[object, List[str], List[Tuple[str, int]], int, int]:
+) -> Tuple[object, List[str], List[Tuple[str, int]], int, int, List[str]]:
     """
     Жадный разрыв пар в начале месяца. Приём операции строгий: Δpair < 0, Δsolo ≤ 0 (и в окне),
     Δcoverage_ok ≥ 0, |Δhours| ≤ hours_budget.
@@ -85,10 +85,11 @@ def apply_pair_breaking(
     Возвращает расписание после правок, лог операций, финальные соло-метрики и pair_score до/после.
     """
     ops_log: List[str] = []
+    apply_log: List[str] = []
     entry_score = _pair_score(pairs)
     if not cfg.get("enabled", False):
         final_solo = sorted(cov.solo_days_by_employee(schedule, code_of).items(), key=lambda kv: kv[0])
-        return schedule, ops_log, final_solo, entry_score, entry_score
+        return schedule, ops_log, final_solo, entry_score, entry_score, apply_log
 
     window_days = int(cfg.get("window_days", 6))
     max_ops = int(cfg.get("max_ops", 4))
@@ -127,7 +128,7 @@ def apply_pair_breaking(
         for direction in (+1, -1):
             test_sched, dh, ok, note = shifts_ops.shift_phase(cur_sched, code_of, eid, direction, (w0, w1))
             if not ok:
-                ops_log.append(f"{eid}: {note} → reject")
+                apply_log.append(f"{eid}: {note} → reject")
                 continue
             # проверим метрики на окне: стало ли лучше по парам и «соло»
             test_pairs = pairing.compute_pairs(test_sched, code_of)
@@ -145,12 +146,14 @@ def apply_pair_breaking(
             cond3 = d_cov >= 0
             cond4 = abs(dh) <= hours_budget
             verdict = "ACCEPT" if (cond1 and cond2 and cond3 and cond4) else "REJECT"
-            ops_log.append(
+            summary = (
                 f"{eid}: dir={'+' if direction > 0 else '-'} "
                 f"window=[{w0.isoformat()}..{w1.isoformat()}] "
                 f"Δpair={d_pair} Δsolo={d_solo}|win={d_solo_win} Δcov={d_cov} Δh={dh} -> {verdict}"
             )
+            apply_log.append(summary)
             if verdict == "ACCEPT":
+                ops_log.append(summary)
                 before_tape = _fmt_tape(cur_sched, code_of, eid, w0, w1)
                 after_tape = _fmt_tape(test_sched, code_of, eid, w0, w1)
                 ops_log.append(f"  tape.before: {before_tape}")
@@ -165,10 +168,10 @@ def apply_pair_breaking(
                 improved = True
                 break
         if not improved:
-            ops_log.append(f"{eid}: skip(no-accept)")
+            apply_log.append(f"{eid}: skip(no-accept)")
 
     # финальные соло-метрики
     final_solo = sorted(cov.solo_days_by_employee(cur_sched, code_of).items(), key=lambda kv: kv[0])
     final_pairs = pairing.compute_pairs(cur_sched, code_of)
     final_score = _pair_score(final_pairs)
-    return cur_sched, ops_log, final_solo, entry_score, final_score
+    return cur_sched, ops_log, final_solo, entry_score, final_score, apply_log

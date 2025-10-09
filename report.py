@@ -287,6 +287,7 @@ def write_pairs_text_report(
 def render_pairs_text_block(
     *,
     ym: str,
+    apply_log: List[str],
     threshold_day: int,
     window_days: int,
     max_ops: int,
@@ -366,6 +367,11 @@ def render_pairs_text_block(
     lines.append(f"pair_score: {pair_score_before} → {pair_score_after} (Δ={pair_score_after - pair_score_before})")
     lines.append("")
 
+    if apply_log:
+        lines.append("[pair_breaking.apply]")
+        lines += apply_log
+        lines.append("")
+
     lines.append("[pair_breaking.summary]")
     accepted = sum(1 for line in ops_log if "-> ACCEPT" in line)
     lines.append(f"ops_applied≈{accepted}")
@@ -381,13 +387,14 @@ def render_pairs_text_block(
 def append_pairs_to_log(
     out_dir: str,
     ym: str,
+    apply_log: List[str],
     **kwargs,
 ) -> str:
     """Апендит блок pairs-отчёта в <out_dir>/<ym>_log.txt и возвращает путь."""
 
     os.makedirs(out_dir, exist_ok=True)
     log_path = os.path.join(out_dir, f"{ym}_log.txt")
-    block = render_pairs_text_block(ym=ym, **kwargs)
+    block = render_pairs_text_block(ym=ym, apply_log=apply_log, **kwargs)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write("\n" + block)
     return log_path

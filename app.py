@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+from typing import List
 from config import CONFIG
 from generator import Generator, Assignment
 import report
@@ -83,7 +84,7 @@ if __name__ == "__main__":
 
         # ---- Балансировка пар (safe-mode в начале месяца) ----
         pairs_before = pairing.compute_pairs(schedule, gen.code_of)
-        schedule_balanced, ops_log, solo_after, pair_score_before_pb, pair_score_after_pb = balancer.apply_pair_breaking(
+        ret = balancer.apply_pair_breaking(
             schedule,
             employees,
             month_spec_eff.get("norm_hours_month", 0),
@@ -92,6 +93,16 @@ if __name__ == "__main__":
             gen.code_of,
             solo_months_counter,
         )
+        schedule_balanced, ops_log, solo_after, *rest = ret
+        apply_log: List[str] = []
+        if len(rest) >= 2:
+            pair_score_before_pb, pair_score_after_pb = rest[0], rest[1]
+            if len(rest) >= 3 and isinstance(rest[2], list):
+                apply_log = rest[2]
+        else:
+            pair_score_after_pb = sum(p[2] for p in pairing.compute_pairs(schedule_balanced, gen.code_of))
+            pair_score_before_pb = pair_score_after_pb
+            apply_log = ops_log[:]
         if CONFIG.get("pair_breaking", {}).get("enabled", False):
             schedule = schedule_balanced
 
@@ -108,10 +119,13 @@ if __name__ == "__main__":
                 log_lines.append(f"[carry_in] {ym}-01: {ap}")
             if CONFIG.get("pair_breaking", {}).get("enabled", False):
                 log_lines.append("[pair_breaking.apply]")
-                if ops_log:
-                    log_lines.extend([f" - {x}" for x in ops_log])
+                if apply_log:
+                    log_lines.extend([f" - {x}" for x in apply_log])
                 else:
                     log_lines.append(" - no-ops")
+                if ops_log:
+                    log_lines.append("[pair_breaking.ops]")
+                    log_lines.extend([f" - {x}" for x in ops_log])
                 # smoke по первым дням
                 smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=CONFIG.get("pair_breaking", {}).get("window_days", 6) + 2)
                 log_lines.append("[coverage.smoke.first-days]")

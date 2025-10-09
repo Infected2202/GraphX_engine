@@ -188,11 +188,15 @@ def run_scenario(scn: dict, out_root: Path):
             solo_months_counter,
         )
         schedule_balanced, ops_log, _solo_after, *rest = ret
+        apply_log: List[str] = []
         if len(rest) >= 2:
-            pair_score_before, pair_score_after = rest[:2]
+            pair_score_before, pair_score_after = rest[0], rest[1]
+            if len(rest) >= 3 and isinstance(rest[2], list):
+                apply_log = rest[2]
         else:
             pair_score_after = sum(p[2] for p in pairing.compute_pairs(schedule_balanced, gen.code_of))
             pair_score_before = pair_score_before_calc
+            apply_log = ops_log[:]
         print(
             f"[pairs.score] before={pair_score_before} after={pair_score_after} "
             f"Δ={pair_score_after - pair_score_before}"
@@ -233,10 +237,13 @@ def run_scenario(scn: dict, out_root: Path):
             log_lines.append(f"[carry_in] {ym}-01: {ap}")
         if cfg2.get("pair_breaking", {}).get("enabled", False):
             log_lines.append("[pair_breaking.apply]")
-            if ops_log:
-                log_lines.extend([f" - {x}" for x in ops_log])
+            if apply_log:
+                log_lines.extend([f" - {x}" for x in apply_log])
             else:
                 log_lines.append(" - no-ops")
+            if ops_log:
+                log_lines.append("[pair_breaking.ops]")
+                log_lines.extend([f" - {x}" for x in ops_log])
             log_lines.append("[coverage.smoke.first-days]")
             for row in smoke:
                 log_lines.append(f" {row[0]}: DA={row[1]} DB={row[2]} NA={row[3]} NB={row[4]}")
@@ -279,6 +286,7 @@ def run_scenario(scn: dict, out_root: Path):
             prev_pairs=prev_pairs_for_month,
             curr_pairs=pairs_after,
             curr_days_total=curr_days_total,
+            apply_log=apply_log if apply_log else ops_log[:],
             ops_log=ops_log,
             pair_score_before=pair_score_before,
             pair_score_after=pair_score_after,
