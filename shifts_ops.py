@@ -14,6 +14,9 @@ NIGHT8 = {"N8A", "N8B"}
 NIGHT4 = {"N4A", "N4B"}
 VAC = {"VAC8", "VAC0"}
 
+_DAY_CODES = ("DA", "DB", "M8A", "M8B", "E8A", "E8B")
+_NIGHT_CODES = ("NA", "NB")
+
 
 def _tok_for_pair(code: str, d: date) -> str:
     c = (code or "OFF").upper()
@@ -72,6 +75,12 @@ def _key_for_code(code: str) -> str:
         "VAC0": "vac_we0",
         "OFF": "off",
     }.get(c, "off")
+
+
+def _set_code(a, code: str) -> None:
+    a.shift_key = _key_for_code(code)
+    a.effective_hours = _hours_for_code(code)
+    a.source = "phase_shift"
 
 
 def _hours_for_code(code: str) -> int:
@@ -177,17 +186,6 @@ def shift_phase(schedule, code_of, emp_id: str, direction: int, window: Tuple[da
 # -------------------- Новые фазовые операторы --------------------
 
 
-def _day_counts_for(schedule, code_of, d: date) -> Tuple[int, int]:
-    da_db = na_nb = 0
-    for a in schedule[d]:
-        c = code_of(a.shift_key).upper()
-        if c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
-            da_db += 1
-        if c in {"NA", "NB"}:
-            na_nb += 1
-    return da_db, na_nb
-
-
 def _set_off(a) -> None:
     a.shift_key = "off"
     a.effective_hours = 0
@@ -197,7 +195,7 @@ def _set_off(a) -> None:
 def phase_shift_minus_one_skip(schedule, code_of, emp_id: str, window: Tuple[date, date]):
     new_sched = copy.deepcopy(schedule)
     days = [d for d in sorted(schedule.keys()) if window[0] <= d <= window[1]]
-    choices: List[Tuple[str, date]] = []
+    days_all = sorted(schedule.keys())
     for d in days:
         assn = next((x for x in new_sched[d] if x.employee_id == emp_id), None)
         if not assn:
@@ -208,23 +206,44 @@ def phase_shift_minus_one_skip(schedule, code_of, emp_id: str, window: Tuple[dat
         if d == max(days) and code in N4:
             continue
         tok = _tok_for_pair(code, d)
-        if tok == "D":
-            da_db, _ = _day_counts_for(new_sched, code_of, d)
-            if da_db >= 3:
-                choices.append(("D", d))
-        elif tok == "N":
-            choices.append(("N", d))
-    if not choices:
-        return schedule, 0, False, "phase_shift_-1: no safe day"
-    choices.sort(key=lambda x: (0 if x[0] == "D" else 1, x[1]))
-    _, chosen_day = choices[0]
-    for a in new_sched[chosen_day]:
-        if a.employee_id == emp_id:
-            before = code_of(a.shift_key).upper()
-            delta = -_hours_for_code(before)
-            _set_off(a)
-            return new_sched, delta, True, f"phase_shift_-1[{chosen_day.isoformat()}]"
-    return schedule, 0, False, "phase_shift_-1: not found"
+        if tok not in ("D", "N"):
+            continue
+        idx = days_all.index(d)
+        left_tok = _tok_for_pair(
+            _emp_code_on(new_sched, code_of, emp_id, days_all[idx - 1]) if idx > 0 else "OFF",
+            days_all[idx - 1] if idx > 0 else d,
+        )
+        right_tok = _tok_for_pair(
+            _emp_code_on(new_sched, code_of, emp_id, days_all[idx + 1]) if idx + 1 < len(days_all) else "OFF",
+            days_all[idx + 1] if idx + 1 < len(days_all) else d,
+        )
+        if left_tok == "O" and right_tok == "O":
+            continue
+        before = code
+        for a in new_sched[d]:
+            if a.employee_id == emp_id:
+                delta = -_hours_for_code(before)
+                _set_off(a)
+                break
+        state_prev = _state_from_token_run(new_sched, code_of, emp_id, d)
+        s_d = _next_state(state_prev)
+        s_d1 = _next_state(s_d)
+        desired0 = "O" if s_d in (2, 3) else ("D" if s_d == 0 else "N")
+        desired1 = "O" if s_d1 in (2, 3) else ("D" if s_d1 == 0 else "N")
+        if not (desired0 == "O" and desired1 == "O"):
+            for a in new_sched[d]:
+                if a.employee_id == emp_id:
+                    _set_code(a, before)
+            continue
+        tail_days = [x for x in days_all if x >= d]
+        cur_state = s_d
+        for x in tail_days:
+            tok_apply = "O" if cur_state in (2, 3) else ("D" if cur_state == 0 else "N")
+            _apply_token(new_sched, code_of, emp_id, x, tok_apply)
+            cur_state = _next_state(cur_state)
+        note = f"phase_shift_-1[{d.isoformat()}]"
+        return new_sched, delta, True, note
+    return schedule, 0, False, "phase_shift_-1: no day fits (would make O,O,O or wrong phase)"
 
 
 def phase_shift_plus_one_insert_off(schedule, code_of, emp_id: str, window: Tuple[date, date]):
@@ -247,14 +266,80 @@ def phase_shift_plus_one_insert_off(schedule, code_of, emp_id: str, window: Tupl
                 continue
             if d2.day == 1 and c2 in N8:
                 continue
-            if t2 == "D":
-                da_db, _ = _day_counts_for(new_sched, code_of, d2)
-                if da_db < 3:
-                    continue
             for a in new_sched[d2]:
                 if a.employee_id == emp_id:
                     before = code_of(a.shift_key).upper()
                     delta = -_hours_for_code(before)
                     _set_off(a)
-                    return new_sched, delta, True, f"phase_shift_+1[{d2.isoformat()}]"
+                    break
+            days_all = sorted(new_sched.keys())
+            idx2 = days_all.index(d2)
+            cur_state = 3
+            for x in days_all[idx2 + 1 :]:
+                cur_state = _next_state(cur_state)
+                tok_apply = "O" if cur_state in (2, 3) else ("D" if cur_state == 0 else "N")
+                _apply_token(new_sched, code_of, emp_id, x, tok_apply)
+            return new_sched, delta, True, f"phase_shift_+1[{d2.isoformat()}]"
     return schedule, 0, False, "phase_shift_+1: no place O,O,(work)"
+
+
+def _emp_code_on(schedule, code_of, emp_id: str, d: date) -> str:
+    for a in schedule[d]:
+        if a.employee_id == emp_id:
+            return code_of(a.shift_key).upper()
+    return "OFF"
+
+
+def _next_state(state: int) -> int:
+    return (state + 1) % 4
+
+
+def _state_from_token_run(schedule, code_of, emp_id: str, d: date) -> int:
+    days = sorted(schedule.keys())
+    idx = days.index(d) if d in days else 0
+    i = max(0, idx - 1)
+    k = i
+    while k >= 0:
+        c = _emp_code_on(schedule, code_of, emp_id, days[k])
+        t = _tok_for_pair(c, days[k])
+        if t != "O":
+            base = 0 if t == "D" else 1
+            r = 0
+            j = k + 1
+            while j <= i:
+                cj = _emp_code_on(schedule, code_of, emp_id, days[j])
+                if _tok_for_pair(cj, days[j]) == "O":
+                    r += 1
+                    j += 1
+                else:
+                    break
+            if r == 0:
+                return base
+            if r == 1:
+                return 2
+            return 3
+        k -= 1
+    return 0
+
+
+def _apply_token(schedule, code_of, emp_id: str, d: date, token: str) -> None:
+    for a in schedule[d]:
+        if a.employee_id != emp_id:
+            continue
+        cur = code_of(a.shift_key).upper()
+        cur_tok = _tok_for_pair(cur, d)
+        if cur_tok == token:
+            return
+        if token == "O":
+            _set_off(a)
+            return
+        if token == "D":
+            if cur in _DAY_CODES:
+                return
+            _set_code(a, "DA")
+            return
+        if token == "N":
+            if cur in _NIGHT_CODES or cur in NIGHT4:
+                return
+            _set_code(a, "NA")
+            return

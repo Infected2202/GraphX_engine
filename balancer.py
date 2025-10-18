@@ -47,22 +47,6 @@ def _hours_by_employee(schedule, code_of) -> Dict[str, int]:
     return hours
 
 
-def _coverage_good_days(schedule, code_of, ordered_dates: List[date], window_days: int) -> int:
-    limit = min(len(ordered_dates), max(1, window_days))
-    good = 0
-    for d in ordered_dates[:limit]:
-        da = db = 0
-        for a in schedule[d]:
-            c = code_of(a.shift_key).upper()
-            if c in {"DA", "M8A", "E8A"}:
-                da += 1
-            if c in {"DB", "M8B", "E8B"}:
-                db += 1
-        if da + db >= 2:
-            good += 1
-    return good
-
-
 def _solo_in_window(schedule, code_of, ordered_dates: List[date], window_days: int, eid: str) -> int:
     limit = min(len(ordered_dates), max(1, window_days))
     window_sched = {d: schedule[d] for d in ordered_dates[:limit]}
@@ -108,25 +92,11 @@ def apply_pair_breaking(
 
         hours_now = _hours_by_employee(cur_sched, code_of)
 
-        def deficit(eid: str) -> float:
-            if eid not in norm_by_emp:
-                return 0.0
-            return norm_by_emp[eid] - hours_now.get(eid, 0)
+        def_a = norm_by_emp.get(emp_a, hours_now.get(emp_a, 0)) - hours_now.get(emp_a, 0)
+        def_b = norm_by_emp.get(emp_b, hours_now.get(emp_b, 0)) - hours_now.get(emp_b, 0)
 
-        def choose_minus() -> str:
-            candidates: List[Tuple[int, str]] = []
-            for eid in (emp_a, emp_b):
-                def_val = deficit(eid)
-                if def_val > 0:
-                    continue
-                candidates.append((hours_now.get(eid, 0), eid))
-            if candidates:
-                candidates.sort(key=lambda item: (-item[0], item[1]))
-                return candidates[0][1]
-            return emp_a if hours_now.get(emp_a, 0) >= hours_now.get(emp_b, 0) else emp_b
-
-        minus_emp = choose_minus()
-        plus_emp = emp_b if minus_emp == emp_a else emp_a
+        minus_emp = emp_a if def_a <= def_b else emp_b
+        plus_emp = emp_b if def_b < def_a else emp_a
 
         w0 = ordered_dates[0]
         w1 = ordered_dates[min(len(ordered_dates) - 1, max(1, window_days) - 1)]
@@ -138,8 +108,6 @@ def apply_pair_breaking(
             for a, b, h_d, h_n, h_t in before_pairs
         }
         pair_id = _pair_key(emp_a, emp_b)
-
-        base_cov = _coverage_good_days(cur_sched, code_of, ordered_dates, window_days)
 
         # --- Опция (-1): пропустить смену ---
         base_solo_minus = _solo_in_window(cur_sched, code_of, ordered_dates, window_days, minus_emp)
@@ -155,14 +123,12 @@ def apply_pair_breaking(
             before_ht = before_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
             after_ht = after_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
             d_pair = after_ht - before_ht
-            after_cov = _coverage_good_days(test_sched, code_of, ordered_dates, window_days)
-            d_cov = after_cov - base_cov
             after_solo_minus = _solo_in_window(test_sched, code_of, ordered_dates, window_days, minus_emp)
             d_solo = after_solo_minus - base_solo_minus
-            verdict = "ACCEPT" if (d_pair < 0 and d_cov >= 0 and d_solo <= 0 and abs(dh) <= hours_budget) else "REJECT"
+            verdict = "ACCEPT" if (d_pair < 0 and d_solo <= 0 and abs(dh) <= hours_budget) else "REJECT"
             summary = (
                 f"{minus_emp}: op=-1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δcov={d_cov} Δh={dh} -> {verdict}"
+                f"Δpair_excl={d_pair} Δsolo={d_solo} Δh={dh} -> {verdict}"
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
@@ -189,14 +155,12 @@ def apply_pair_breaking(
         before_ht = before_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
         after_ht = after_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
         d_pair = after_ht - before_ht
-        after_cov = _coverage_good_days(test_sched, code_of, ordered_dates, window_days)
-        d_cov = after_cov - base_cov
         after_solo_plus = _solo_in_window(test_sched, code_of, ordered_dates, window_days, plus_emp)
         d_solo = after_solo_plus - base_solo_plus
-        verdict = "ACCEPT" if (d_pair <= 0 and d_cov >= 0 and d_solo <= 0 and abs(dh2) <= hours_budget) else "REJECT"
+        verdict = "ACCEPT" if (d_solo <= 0 and abs(dh2) <= hours_budget) else "REJECT"
         summary = (
             f"{plus_emp}: op=+1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-            f"Δpair_excl={d_pair} Δsolo={d_solo} Δcov={d_cov} Δh={dh2} -> {verdict}"
+            f"Δpair_excl={d_pair} Δsolo={d_solo} Δh={dh2} -> {verdict}"
         )
         apply_log.append(summary)
         if verdict == "ACCEPT":
