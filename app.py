@@ -84,25 +84,14 @@ if __name__ == "__main__":
 
         # ---- Балансировка пар (safe-mode в начале месяца) ----
         pairs_before = pairing.compute_pairs(schedule, gen.code_of)
-        ret = balancer.apply_pair_breaking(
+        pb_cfg = dict(CONFIG.get("pair_breaking", {}) or {})
+        pb_cfg.setdefault("prev_pairs", prev_pairs_for_report or [])
+        schedule_balanced, ops_log, solo_after, pair_score_before_pb, pair_score_after_pb, apply_log = balancer.apply_pair_breaking(
             schedule,
             employees,
-            month_spec_eff.get("norm_hours_month", 0),
-            pairs_before,
-            CONFIG.get("pair_breaking", {}),
             gen.code_of,
-            solo_months_counter,
+            pb_cfg,
         )
-        schedule_balanced, ops_log, solo_after, *rest = ret
-        apply_log: List[str] = []
-        if len(rest) >= 2:
-            pair_score_before_pb, pair_score_after_pb = rest[0], rest[1]
-            if len(rest) >= 3 and isinstance(rest[2], list):
-                apply_log = rest[2]
-        else:
-            pair_score_after_pb = sum(p[2] for p in pairing.compute_pairs(schedule_balanced, gen.code_of))
-            pair_score_before_pb = pair_score_after_pb
-            apply_log = ops_log[:]
         if CONFIG.get("pair_breaking", {}).get("enabled", False):
             schedule = schedule_balanced
 

@@ -177,26 +177,15 @@ def run_scenario(scn: dict, out_root: Path):
 
         # балансировка пар (safe-mode в начале месяца)
         pairs_before = pairing.compute_pairs(schedule, gen.code_of)
-        pair_score_before_calc = sum(p[2] for p in pairs_before)
-        ret = balancer.apply_pair_breaking(
+        pb_cfg = dict(cfg2.get("pair_breaking", {}) or {})
+        prev_pairs_hint = scn.get("prev_pairs_for_month") or scn.get("prev_pairs") or prev_pairs_for_month or []
+        pb_cfg.setdefault("prev_pairs", prev_pairs_hint)
+        schedule_balanced, ops_log, _solo_after, pair_score_before, pair_score_after, apply_log = balancer.apply_pair_breaking(
             schedule,
             employees,
-            month_spec_eff.get("norm_hours_month", 0),
-            pairs_before,
-            cfg2.get("pair_breaking", {}),
             gen.code_of,
-            solo_months_counter,
+            pb_cfg,
         )
-        schedule_balanced, ops_log, _solo_after, *rest = ret
-        apply_log: List[str] = []
-        if len(rest) >= 2:
-            pair_score_before, pair_score_after = rest[0], rest[1]
-            if len(rest) >= 3 and isinstance(rest[2], list):
-                apply_log = rest[2]
-        else:
-            pair_score_after = sum(p[2] for p in pairing.compute_pairs(schedule_balanced, gen.code_of))
-            pair_score_before = pair_score_before_calc
-            apply_log = ops_log[:]
         print(
             f"[pairs.score] before={pair_score_before} after={pair_score_after} "
             f"Δ={pair_score_after - pair_score_before}"
@@ -294,6 +283,7 @@ def run_scenario(scn: dict, out_root: Path):
         print(f"[report.pairs->_log] appended: {appended_log_path}")
 
         prev_pairs_for_month = pairs_after
+        scn["prev_pairs_for_month"] = prev_pairs_for_month
 
         # хвост → следующий месяц
         prev_tail_by_emp = extract_tail(schedule, employees, gen)
