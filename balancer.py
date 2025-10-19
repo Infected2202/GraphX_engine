@@ -116,7 +116,24 @@ def apply_pair_breaking(
 
     prev_pairs = cfg.get("prev_pairs") or []
     threshold_day = int(cfg.get("overlap_threshold", 6))
-    entry_pairs = pairing.pair_hours_exclusive(schedule, code_of, prev_pairs, threshold_day=threshold_day)
+
+    intern_ids_cfg = set(cfg.get("intern_ids", []) or [])
+    intern_ids_emp = {
+        e.id
+        for e in employees
+        if getattr(e, "is_intern", False)
+        or getattr(e, "intern", False)
+        or (hasattr(e, "tags") and (e.tags or []) and "intern" in e.tags)
+    }
+    intern_ids = intern_ids_cfg | intern_ids_emp
+
+    entry_pairs = pairing.pair_hours_exclusive(
+        schedule,
+        code_of,
+        prev_pairs,
+        threshold_day=threshold_day,
+        skip_ids=intern_ids,
+    )
     entry_score = sum(item[4] for item in entry_pairs)
 
     if not cfg.get("enabled", False):
@@ -130,7 +147,27 @@ def apply_pair_breaking(
 
     cur_sched = copy.deepcopy(schedule)
     ordered_dates = sorted(cur_sched.keys())
+
+    base_pairs_hours = pairing.pair_hours_exclusive(
+        cur_sched,
+        code_of,
+        prev_pairs,
+        threshold_day=threshold_day,
+        skip_ids=intern_ids,
+    )
+    base_score = sum(item[4] for item in base_pairs_hours)
+
     prev_exclusive = pairing.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
+    prev_exclusive = [
+        (a, b, d, n)
+        for (a, b, d, n) in prev_exclusive
+        if a not in intern_ids and b not in intern_ids
+    ]
+
+    moved: set[str] = set()
+    pred_hours_cum = 0
+    pred_zero_cnt = 0
+    pred_minus12_cnt = 0
 
     def _pair_key(a: str, b: str) -> str:
         return f"{a}~{b}" if a < b else f"{b}~{a}"
@@ -139,9 +176,11 @@ def apply_pair_breaking(
     for emp_a, emp_b, _, _ in prev_exclusive:
         if ops >= max_ops:
             break
+        if emp_a in moved or emp_b in moved:
+            apply_log.append(f"{emp_a}~{emp_b}: skip(pair-member already moved)")
+            continue
 
         hours_now = _hours_by_employee(cur_sched, code_of)
-
         def_a = norm_by_emp.get(emp_a, hours_now.get(emp_a, 0)) - hours_now.get(emp_a, 0)
         def_b = norm_by_emp.get(emp_b, hours_now.get(emp_b, 0)) - hours_now.get(emp_b, 0)
 
@@ -150,25 +189,56 @@ def apply_pair_breaking(
         minus_emp = emp_a if (dHm_a > dHm_b) or (dHm_a == dHm_b and def_a <= def_b) else emp_b
         plus_emp = emp_b if minus_emp == emp_a else emp_a
 
+        if minus_emp in intern_ids:
+            minus_emp = plus_emp
+        if minus_emp in intern_ids or plus_emp in intern_ids:
+            apply_log.append(f"{emp_a}~{emp_b}: skip(intern in pair)")
+            continue
+
+        limit = min(len(ordered_dates) - 1, max(1, window_days) - 1)
         w0 = ordered_dates[0]
-        w1 = ordered_dates[min(len(ordered_dates) - 1, max(1, window_days) - 1)]
+        w1 = ordered_dates[limit]
         window = (w0, w1)
 
-        before_pairs = pairing.pair_hours_exclusive(cur_sched, code_of, prev_pairs, threshold_day=threshold_day)
+        before_pairs = pairing.pair_hours_exclusive(
+            cur_sched,
+            code_of,
+            prev_pairs,
+            threshold_day=threshold_day,
+            skip_ids=intern_ids,
+        )
         before_map = {
             _pair_key(a, b): (a, b, h_d, h_n, h_t)
             for a, b, h_d, h_n, h_t in before_pairs
         }
         pair_id = _pair_key(emp_a, emp_b)
 
-        # --- Опция (-1): пропустить смену ---
         base_solo_minus = _solo_in_window(cur_sched, code_of, ordered_dates, window_days, minus_emp)
         dHpred1 = _delta_hours_pred_minus_one(cur_sched, code_of, minus_emp)
-        test_sched, dh, ok, note = shifts_ops.phase_shift_minus_one_skip(cur_sched, code_of, minus_emp, window)
-        if not ok:
-            apply_log.append(f"{minus_emp}: op=-1 Δhours_pred={dHpred1} {note}")
+
+        test_sched = None
+        ok1 = False
+        note1 = ""
+        blocked_budget1 = False
+        if (pred_hours_cum + dHpred1) < -hours_budget:
+            apply_log.append(
+                f"{minus_emp}: op=-1 window=[{w0.isoformat()}..{w1.isoformat()}] "
+                f"Δhours_pred={dHpred1} Σpred={pred_hours_cum} budget={-hours_budget} -> REJECT(budget)"
+            )
+            blocked_budget1 = True
         else:
-            after_pairs = pairing.pair_hours_exclusive(test_sched, code_of, prev_pairs, threshold_day=threshold_day)
+            test_sched, dh1, ok1, note1 = shifts_ops.phase_shift_minus_one_skip(
+                cur_sched, code_of, minus_emp, window
+            )
+
+        if ok1 and test_sched is not None:
+            after_pairs = pairing.pair_hours_exclusive(
+                test_sched,
+                code_of,
+                prev_pairs,
+                threshold_day=threshold_day,
+                skip_ids=intern_ids,
+            )
             after_map = {
                 _pair_key(a, b): (a, b, h_d, h_n, h_t)
                 for a, b, h_d, h_n, h_t in after_pairs
@@ -178,10 +248,10 @@ def apply_pair_breaking(
             d_pair = after_ht - before_ht
             after_solo_minus = _solo_in_window(test_sched, code_of, ordered_dates, window_days, minus_emp)
             d_solo = after_solo_minus - base_solo_minus
-            verdict = "ACCEPT" if (d_pair < 0 and d_solo <= 0 and abs(dh) <= hours_budget) else "REJECT"
+            verdict = "ACCEPT" if (d_pair < 0 and d_solo <= 0) else "REJECT"
             summary = (
                 f"{minus_emp}: op=-1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δhours_pred={dHpred1} Δh={dh} -> {verdict}"
+                f"Δpair_excl={d_pair} Δsolo={d_solo} Δhours_pred={dHpred1} Σpred={pred_hours_cum + dHpred1} -> {verdict}"
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
@@ -190,42 +260,102 @@ def apply_pair_breaking(
                 ops_log.append(f"  tape.after : {_fmt_tape(test_sched, code_of, minus_emp, w0, w1)}")
                 cur_sched = test_sched
                 ordered_dates = sorted(cur_sched.keys())
+                base_pairs_hours = after_pairs
+                base_score = sum(item[4] for item in base_pairs_hours)
                 ops += 1
+                moved.add(minus_emp)
+                pred_hours_cum += dHpred1
+                if dHpred1 == 0:
+                    pred_zero_cnt += 1
+                elif dHpred1 == -12:
+                    pred_minus12_cnt += 1
                 continue
+        elif not ok1 and not blocked_budget1:
+            apply_log.append(f"{minus_emp}: op=-1 Δhours_pred={dHpred1} Σpred={pred_hours_cum} {note1}".strip())
 
-        # --- Опция (+1): вставка OFF ---
         base_solo_plus = _solo_in_window(cur_sched, code_of, ordered_dates, window_days, plus_emp)
         dHpred2 = _delta_hours_pred_plus_one(cur_sched, code_of, plus_emp)
-        test_sched, dh2, ok2, note2 = shifts_ops.phase_shift_plus_one_insert_off(cur_sched, code_of, plus_emp, window)
-        if not ok2:
-            apply_log.append(f"{plus_emp}: op=+1 Δhours_pred={dHpred2} {note2}")
-            continue
 
-        after_pairs = pairing.pair_hours_exclusive(test_sched, code_of, prev_pairs, threshold_day=threshold_day)
-        after_map = {
-            _pair_key(a, b): (a, b, h_d, h_n, h_t)
-            for a, b, h_d, h_n, h_t in after_pairs
-        }
-        before_ht = before_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
-        after_ht = after_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
-        d_pair = after_ht - before_ht
-        after_solo_plus = _solo_in_window(test_sched, code_of, ordered_dates, window_days, plus_emp)
-        d_solo = after_solo_plus - base_solo_plus
-        verdict = "ACCEPT" if (d_solo <= 0 and abs(dh2) <= hours_budget) else "REJECT"
-        summary = (
-            f"{plus_emp}: op=+1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-            f"Δpair_excl={d_pair} Δsolo={d_solo} Δhours_pred={dHpred2} Δh={dh2} -> {verdict}"
-        )
-        apply_log.append(summary)
-        if verdict == "ACCEPT":
-            ops_log.append(summary)
-            ops_log.append(f"  tape.before: {_fmt_tape(cur_sched, code_of, plus_emp, w0, w1)}")
-            ops_log.append(f"  tape.after : {_fmt_tape(test_sched, code_of, plus_emp, w0, w1)}")
-            cur_sched = test_sched
-            ordered_dates = sorted(cur_sched.keys())
-            ops += 1
+        test_sched2 = None
+        ok2 = False
+        note2 = ""
+        blocked_budget2 = False
+        if (pred_hours_cum + dHpred2) < -hours_budget:
+            apply_log.append(
+                f"{plus_emp}: op=+1 window=[{w0.isoformat()}..{w1.isoformat()}] "
+                f"Δhours_pred={dHpred2} Σpred={pred_hours_cum} budget={-hours_budget} -> REJECT(budget)"
+            )
+            blocked_budget2 = True
+        else:
+            test_sched2, dh2, ok2, note2 = shifts_ops.phase_shift_plus_one_insert_off(
+                cur_sched, code_of, plus_emp, window
+            )
+
+        if ok2 and test_sched2 is not None:
+            after_pairs = pairing.pair_hours_exclusive(
+                test_sched2,
+                code_of,
+                prev_pairs,
+                threshold_day=threshold_day,
+                skip_ids=intern_ids,
+            )
+            after_map = {
+                _pair_key(a, b): (a, b, h_d, h_n, h_t)
+                for a, b, h_d, h_n, h_t in after_pairs
+            }
+            before_ht = before_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
+            after_ht = after_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
+            d_pair = after_ht - before_ht
+            after_solo_plus = _solo_in_window(test_sched2, code_of, ordered_dates, window_days, plus_emp)
+            d_solo = after_solo_plus - base_solo_plus
+            verdict = "ACCEPT" if (d_solo <= 0) else "REJECT"
+            summary = (
+                f"{plus_emp}: op=+1 window=[{w0.isoformat()}..{w1.isoformat()}] "
+                f"Δpair_excl={d_pair} Δsolo={d_solo} Δhours_pred={dHpred2} Σpred={pred_hours_cum + dHpred2} -> {verdict}"
+            )
+            apply_log.append(summary)
+            if verdict == "ACCEPT":
+                ops_log.append(summary)
+                ops_log.append(f"  tape.before: {_fmt_tape(cur_sched, code_of, plus_emp, w0, w1)}")
+                ops_log.append(f"  tape.after : {_fmt_tape(test_sched2, code_of, plus_emp, w0, w1)}")
+                cur_sched = test_sched2
+                ordered_dates = sorted(cur_sched.keys())
+                base_pairs_hours = after_pairs
+                base_score = sum(item[4] for item in base_pairs_hours)
+                ops += 1
+                moved.add(plus_emp)
+                pred_hours_cum += dHpred2
+                if dHpred2 == 0:
+                    pred_zero_cnt += 1
+                elif dHpred2 == -12:
+                    pred_minus12_cnt += 1
+                continue
+        elif not ok2 and not blocked_budget2:
+            apply_log.append(f"{plus_emp}: op=+1 Δhours_pred={dHpred2} Σpred={pred_hours_cum} {note2}".strip())
 
     solo_after = cov.solo_days_by_employee(cur_sched, code_of)
-    final_pairs = pairing.pair_hours_exclusive(cur_sched, code_of, prev_pairs, threshold_day=threshold_day)
-    final_score = sum(item[4] for item in final_pairs)
-    return cur_sched, ops_log, solo_after, entry_score, final_score, apply_log
+    after_pairs = pairing.pair_hours_exclusive(
+        cur_sched,
+        code_of,
+        prev_pairs,
+        threshold_day=threshold_day,
+        skip_ids=intern_ids,
+    )
+    after_score = sum(item[4] for item in after_pairs)
+
+    ops_log.append("[pairs.after_ops.delta]")
+    before_map = {
+        _pair_key(a, b): ht for a, b, _, _, ht in entry_pairs
+    }
+    after_map = {
+        _pair_key(a, b): ht for a, b, _, _, ht in after_pairs
+    }
+    for key in sorted(set(before_map.keys()) | set(after_map.keys())):
+        b = before_map.get(key, 0)
+        a = after_map.get(key, 0)
+        ops_log.append(f" {key}: {b} → {a} (Δ={a - b})")
+    ops_log.append(
+        f"[pairs.ops.summary] accepted={ops} pred_hours: Σ={pred_hours_cum} (0={pred_zero_cnt}, -12={pred_minus12_cnt})"
+    )
+
+    return cur_sched, ops_log, solo_after, entry_score, after_score, apply_log

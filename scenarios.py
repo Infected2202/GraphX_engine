@@ -175,11 +175,16 @@ def run_scenario(scn: dict, out_root: Path):
             prev_tail_by_emp=prev_tail_by_emp
         )
 
+        # baseline-validator до балансировки
+        baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
+
         # балансировка пар (safe-mode в начале месяца)
         pairs_before = pairing.compute_pairs(schedule, gen.code_of)
         pb_cfg = dict(cfg2.get("pair_breaking", {}) or {})
         prev_pairs_hint = scn.get("prev_pairs_for_month") or scn.get("prev_pairs") or prev_pairs_for_month or []
         pb_cfg.setdefault("prev_pairs", prev_pairs_hint)
+        if "intern_ids" in scn:
+            pb_cfg["intern_ids"] = scn["intern_ids"]
         schedule_balanced, ops_log, _solo_after, pair_score_before, pair_score_after, apply_log = balancer.apply_pair_breaking(
             schedule,
             employees,
@@ -196,8 +201,29 @@ def run_scenario(scn: dict, out_root: Path):
         # пост-перекраска отпусков (VAC8/VAC0)
         postprocess.apply_vacations(schedule, eff_vacations, gen.shift_types)
 
-        # валидации
-        baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
+        # пересчёт carry_out после всех сдвигов
+        if schedule:
+            last_day = max(schedule.keys())
+            next_year = last_day.year + (1 if last_day.month == 12 else 0)
+            next_month = 1 if last_day.month == 12 else last_day.month + 1
+            new_carry_out: List[Assignment] = []
+            for entry in schedule[last_day]:
+                code = gen.code_of(entry.shift_key).upper()
+                if code in {"N4A", "N4B"}:
+                    key = "n8_a" if code.endswith("A") else "n8_b"
+                    st = gen.shift_types[key]
+                    new_carry_out.append(
+                        Assignment(
+                            entry.employee_id,
+                            date(next_year, next_month, 1),
+                            key,
+                            st.hours,
+                            source="autofix",
+                        )
+                    )
+            carry_out = new_carry_out
+
+        # валидации и диагностика
         smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=cfg2.get("pair_breaking",{}).get("window_days",6)+2)
         trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
 

@@ -135,10 +135,17 @@ def pair_hours_exclusive(
     code_of,
     prev_pairs: List[Tuple[str, str, int, int]] | None,
     threshold_day: int = 0,
+    skip_ids: Set[str] | None = None,
 ) -> List[Tuple[str, str, int, int, int]]:
     """Эксклюзивные пары прошлого месяца и их часы совпадений в текущем месяце."""
 
     prev_excl = exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
+    if skip_ids:
+        prev_excl = [
+            (e1, e2, d, n)
+            for (e1, e2, d, n) in prev_excl
+            if e1 not in skip_ids and e2 not in skip_ids
+        ]
     out: List[Tuple[str, str, int, int, int]] = []
     for e1, e2, _, _ in prev_excl:
         h_day, h_night, h_total = pair_hours_for_pair(schedule, code_of, e1, e2)
