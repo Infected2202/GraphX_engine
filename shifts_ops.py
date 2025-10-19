@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List, Tuple
 from datetime import date
 import copy
+import rotor
 
 # --- Code groups ---
 N8 = {"N8A", "N8B"}
@@ -13,10 +14,6 @@ NIGHT12 = {"NA", "NB"}
 NIGHT8 = {"N8A", "N8B"}
 NIGHT4 = {"N4A", "N4B"}
 VAC = {"VAC8", "VAC0"}
-
-_DAY_CODES = ("DA", "DB", "M8A", "M8B", "E8A", "E8B")
-_NIGHT_CODES = ("NA", "NB")
-
 
 def _tok_for_pair(code: str, d: date) -> str:
     c = (code or "OFF").upper()
@@ -75,12 +72,6 @@ def _key_for_code(code: str) -> str:
         "VAC0": "vac_we0",
         "OFF": "off",
     }.get(c, "off")
-
-
-def _set_code(a, code: str) -> None:
-    a.shift_key = _key_for_code(code)
-    a.effective_hours = _hours_for_code(code)
-    a.source = "phase_shift"
 
 
 def _emp_code_on(schedule, code_of, emp_id: str, d: date) -> str:
@@ -242,10 +233,11 @@ def phase_shift_minus_one_skip(schedule, code_of, emp_id: str, window: Tuple[dat
                 _set_off(a)
                 break
 
-        pattern = ["O", "O", "D", "N"]
-        for offset in range(1, total - idx):
-            tok = pattern[offset % 4]
-            _apply_token(new_sched, code_of, emp_id, days_all[idx + offset], tok)
+        tokens = [
+            "O" if (offset % 4) in (0, 1) else ("D" if (offset % 4) == 2 else "N")
+            for offset in range(0, total - idx)
+        ]
+        rotor.stitch_into_schedule(new_sched, code_of, emp_id, days_all[idx], tokens)
 
         return new_sched, dh, True, f"phase_shift_-1[{d.isoformat()}]"
 
@@ -288,34 +280,14 @@ def phase_shift_plus_one_insert_off(schedule, code_of, emp_id: str, window: Tupl
 
             days_all = sorted(new_sched.keys())
             idx2 = days_all.index(d2)
-            pattern = ["O", "D", "N", "O"]  # после вставки: O (третье), затем D,N,O,…
-            for offset, day in enumerate(days_all[idx2 + 1 :], start=1):
-                tok = pattern[offset % 4]
-                _apply_token(new_sched, code_of, emp_id, day, tok)
+            tokens = [
+                "O" if (offset % 4) in (0, 3) else ("D" if (offset % 4) == 1 else "N")
+                for offset in range(0, len(days_all) - idx2)
+            ]
+            rotor.stitch_into_schedule(new_sched, code_of, emp_id, days_all[idx2], tokens)
 
             return new_sched, dh, True, f"phase_shift_+1[{d2.isoformat()}]"
 
     return schedule, 0, False, "phase_shift_+1: no place O,O,(work)"
 
 
-def _apply_token(schedule, code_of, emp_id: str, d: date, token: str) -> None:
-    for a in schedule[d]:
-        if a.employee_id != emp_id:
-            continue
-        cur = code_of(a.shift_key).upper()
-        cur_tok = _tok_for_pair(cur, d)
-        if cur_tok == token:
-            return
-        if token == "O":
-            _set_off(a)
-            return
-        if token == "D":
-            if cur in _DAY_CODES:
-                return
-            _set_code(a, "DA")
-            return
-        if token == "N":
-            if cur in _NIGHT_CODES or cur in NIGHT4:
-                return
-            _set_code(a, "NA")
-            return
