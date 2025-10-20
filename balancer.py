@@ -143,6 +143,7 @@ def apply_pair_breaking(
     window_days = int(cfg.get("window_days", 6))
     max_ops = int(cfg.get("max_ops", 4))
     hours_budget = int(cfg.get("hours_budget", 0))
+    anti_align = bool(cfg.get("anti_align", True))
     norm_by_emp: Dict[str, int] = cfg.get("norm_by_employee", {}) or {}
 
     cur_sched = copy.deepcopy(schedule)
@@ -176,6 +177,8 @@ def apply_pair_breaking(
     for emp_a, emp_b, _, _ in prev_exclusive:
         if ops >= max_ops:
             break
+        def partner_of(emp: str) -> str:
+            return emp_b if emp == emp_a else emp_a
         if emp_a in moved or emp_b in moved:
             apply_log.append(f"{emp_a}~{emp_b}: skip(pair-member already moved)")
             continue
@@ -228,7 +231,12 @@ def apply_pair_breaking(
             blocked_budget1 = True
         else:
             test_sched, dh1, ok1, note1 = shifts_ops.phase_shift_minus_one_skip(
-                cur_sched, code_of, minus_emp, window
+                cur_sched,
+                code_of,
+                minus_emp,
+                window,
+                partner_id=partner_of(minus_emp),
+                anti_align=anti_align,
             )
 
         if ok1 and test_sched is not None:
@@ -288,7 +296,12 @@ def apply_pair_breaking(
             blocked_budget2 = True
         else:
             test_sched2, dh2, ok2, note2 = shifts_ops.phase_shift_plus_one_insert_off(
-                cur_sched, code_of, plus_emp, window
+                cur_sched,
+                code_of,
+                plus_emp,
+                window,
+                partner_id=partner_of(plus_emp),
+                anti_align=anti_align,
             )
 
         if ok2 and test_sched2 is not None:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from datetime import date
 import copy
 import rotor
@@ -194,7 +194,14 @@ def _set_off(a) -> None:
     a.source = "phase_shift"
 
 
-def phase_shift_minus_one_skip(schedule, code_of, emp_id: str, window: Tuple[date, date]):
+def phase_shift_minus_one_skip(
+    schedule,
+    code_of,
+    emp_id: str,
+    window: Tuple[date, date],
+    partner_id: Optional[str] = None,
+    anti_align: bool = True,
+):
     """
     Сдвиг фазы -1: убираем ночную смену N в первом фрагменте D,N,O,(O) окна
     и перешиваем хвост по циклу O,O,D,N,… (двойной OFF гарантирован, тройного OFF не будет).
@@ -237,14 +244,29 @@ def phase_shift_minus_one_skip(schedule, code_of, emp_id: str, window: Tuple[dat
             "O" if (offset % 4) in (0, 1) else ("D" if (offset % 4) == 2 else "N")
             for offset in range(0, total - idx)
         ]
-        rotor.stitch_into_schedule(new_sched, code_of, emp_id, days_all[idx], tokens)
+        rotor.stitch_into_schedule(
+            new_sched,
+            code_of,
+            emp_id,
+            days_all[idx],
+            tokens,
+            partner_id=partner_id,
+            anti_align=anti_align,
+        )
 
         return new_sched, dh, True, f"phase_shift_-1[{d.isoformat()}]"
 
     return schedule, 0, False, "phase_shift_-1: no D,N,O pattern in window"
 
 
-def phase_shift_plus_one_insert_off(schedule, code_of, emp_id: str, window: Tuple[date, date]):
+def phase_shift_plus_one_insert_off(
+    schedule,
+    code_of,
+    emp_id: str,
+    window: Tuple[date, date],
+    partner_id: Optional[str] = None,
+    anti_align: bool = True,
+):
     """
     Сдвиг фазы +1: вставляем дополнительный OFF в первом блоке O,O,(работа)
     и продолжаем цикл как O,O,O,D,N,…
@@ -284,7 +306,15 @@ def phase_shift_plus_one_insert_off(schedule, code_of, emp_id: str, window: Tupl
                 "O" if (offset % 4) in (0, 3) else ("D" if (offset % 4) == 1 else "N")
                 for offset in range(0, len(days_all) - idx2)
             ]
-            rotor.stitch_into_schedule(new_sched, code_of, emp_id, days_all[idx2], tokens)
+            rotor.stitch_into_schedule(
+                new_sched,
+                code_of,
+                emp_id,
+                days_all[idx2],
+                tokens,
+                partner_id=partner_id,
+                anti_align=anti_align,
+            )
 
             return new_sched, dh, True, f"phase_shift_+1[{d2.isoformat()}]"
 
