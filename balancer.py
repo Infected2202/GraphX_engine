@@ -7,6 +7,8 @@ import shifts_ops
 import pairing
 import coverage as cov
 
+DAYC = {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}
+
 
 def _fmt_tape(schedule, code_of, eid: str, w0: date, w1: date) -> str:
     """Лента по окну дат с токенами и отметкой carry-in N8."""
@@ -45,6 +47,24 @@ def _hours_by_employee(schedule, code_of) -> Dict[str, int]:
                 h = 0
             hours[a.employee_id] = hours.get(a.employee_id, 0) + h
     return hours
+
+
+def _hours_of(code: str) -> int:
+    c = (code or "OFF").upper()
+    if c in {"DA", "DB", "NA", "NB"}:
+        return 12
+    if c in {"M8A", "M8B", "E8A", "E8B", "N8A", "N8B", "VAC8"}:
+        return 8
+    if c in {"N4A", "N4B"}:
+        return 4
+    return 0
+
+
+def _code_on(schedule, code_of, emp_id: str, d: date) -> str:
+    for a in schedule[d]:
+        if a.employee_id == emp_id:
+            return code_of(a.shift_key).upper()
+    return "OFF"
 
 
 def _tok_for_pair(code: str, d: date) -> str:
@@ -101,6 +121,37 @@ def _solo_in_window(schedule, code_of, ordered_dates: List[date], window_days: i
     limit = min(len(ordered_dates), max(1, window_days))
     window_sched = {d: schedule[d] for d in ordered_dates[:limit]}
     return cov.solo_days_by_employee(window_sched, code_of).get(eid, 0)
+
+
+def _same_office_overlap_hours(
+    schedule,
+    code_of,
+    emp_a: str,
+    emp_b: str,
+    ordered_dates: List[date],
+    window_days: int,
+) -> int:
+    limit = min(len(ordered_dates), max(1, window_days))
+    hours = 0
+    for day in ordered_dates[:limit]:
+        code_a = _code_on(schedule, code_of, emp_a, day)
+        code_b = _code_on(schedule, code_of, emp_b, day)
+        if day.day == 1 and (code_a in {"N8A", "N8B"} or code_b in {"N8A", "N8B"}):
+            continue
+        if (
+            code_a in DAYC
+            and code_b in DAYC
+            and code_a.endswith("A") == code_b.endswith("A")
+        ):
+            hours += min(_hours_of(code_a), _hours_of(code_b))
+            continue
+        if (
+            code_a in {"NA", "NB", "N4A", "N4B"}
+            and code_b in {"NA", "NB", "N4A", "N4B"}
+            and code_a.endswith("A") == code_b.endswith("A")
+        ):
+            hours += min(_hours_of(code_a), _hours_of(code_b))
+    return hours
 
 
 def apply_pair_breaking(
@@ -217,6 +268,7 @@ def apply_pair_breaking(
         pair_id = _pair_key(emp_a, emp_b)
 
         base_solo_minus = _solo_in_window(cur_sched, code_of, ordered_dates, window_days, minus_emp)
+        before_same_office = _same_office_overlap_hours(cur_sched, code_of, emp_a, emp_b, ordered_dates, window_days)
         dHpred1 = _delta_hours_pred_minus_one(cur_sched, code_of, minus_emp)
 
         test_sched = None
@@ -256,10 +308,15 @@ def apply_pair_breaking(
             d_pair = after_ht - before_ht
             after_solo_minus = _solo_in_window(test_sched, code_of, ordered_dates, window_days, minus_emp)
             d_solo = after_solo_minus - base_solo_minus
-            verdict = "ACCEPT" if (d_pair < 0 and d_solo <= 0) else "REJECT"
+            after_same_office = _same_office_overlap_hours(
+                test_sched, code_of, emp_a, emp_b, ordered_dates, window_days
+            )
+            so_ok = after_same_office <= before_same_office
+            verdict = "ACCEPT" if (d_pair < 0 and d_solo <= 0 and so_ok) else "REJECT"
             summary = (
                 f"{minus_emp}: op=-1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δhours_pred={dHpred1} Σpred={pred_hours_cum + dHpred1} -> {verdict}"
+                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δhours_pred={dHpred1} Σpred={pred_hours_cum + dHpred1} -> {verdict}"
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
@@ -321,10 +378,15 @@ def apply_pair_breaking(
             d_pair = after_ht - before_ht
             after_solo_plus = _solo_in_window(test_sched2, code_of, ordered_dates, window_days, plus_emp)
             d_solo = after_solo_plus - base_solo_plus
-            verdict = "ACCEPT" if (d_solo <= 0) else "REJECT"
+            after_same_office = _same_office_overlap_hours(
+                test_sched2, code_of, emp_a, emp_b, ordered_dates, window_days
+            )
+            so_ok = after_same_office <= before_same_office
+            verdict = "ACCEPT" if (d_solo <= 0 and so_ok) else "REJECT"
             summary = (
                 f"{plus_emp}: op=+1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δhours_pred={dHpred2} Σpred={pred_hours_cum + dHpred2} -> {verdict}"
+                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δhours_pred={dHpred2} Σpred={pred_hours_cum + dHpred2} -> {verdict}"
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
@@ -345,6 +407,109 @@ def apply_pair_breaking(
                 continue
         elif not ok2 and not blocked_budget2:
             apply_log.append(f"{plus_emp}: op=+1 Δhours_pred={dHpred2} Σpred={pred_hours_cum} {note2}".strip())
+
+        if ops >= max_ops:
+            continue
+
+        flip_sched_d, _, ok_flip_d, note_flip_d = shifts_ops.flip_ab_on_next_token(
+            cur_sched,
+            code_of,
+            minus_emp,
+            window,
+            kind="D",
+            partner_id=partner_of(minus_emp),
+            anti_align=anti_align,
+        )
+        if ok_flip_d:
+            after_pairs = pairing.pair_hours_exclusive(
+                flip_sched_d,
+                code_of,
+                prev_pairs,
+                threshold_day=threshold_day,
+                skip_ids=intern_ids,
+            )
+            after_map = {
+                _pair_key(a, b): (a, b, h_d, h_n, h_t)
+                for a, b, h_d, h_n, h_t in after_pairs
+            }
+            before_ht = before_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
+            after_ht = after_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
+            d_pair = after_ht - before_ht
+            after_same_office = _same_office_overlap_hours(
+                flip_sched_d, code_of, emp_a, emp_b, ordered_dates, window_days
+            )
+            so_ok = after_same_office <= before_same_office
+            d_solo = _solo_in_window(flip_sched_d, code_of, ordered_dates, window_days, minus_emp) - base_solo_minus
+            verdict = "ACCEPT" if (d_solo <= 0 and so_ok) else "REJECT"
+            summary = (
+                f"{minus_emp}: op=flipD window=[{w0.isoformat()}..{w1.isoformat()}] "
+                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δhours_pred=0 Σpred={pred_hours_cum} -> {verdict}"
+            )
+            apply_log.append(summary)
+            if verdict == "ACCEPT":
+                ops_log.append(summary)
+                cur_sched = flip_sched_d
+                ordered_dates = sorted(cur_sched.keys())
+                base_pairs_hours = after_pairs
+                base_score = sum(item[4] for item in base_pairs_hours)
+                ops += 1
+                moved.add(minus_emp)
+                continue
+
+        if ops >= max_ops:
+            continue
+
+        flip_sched_n, _, ok_flip_n, note_flip_n = shifts_ops.flip_ab_on_next_token(
+            cur_sched,
+            code_of,
+            plus_emp,
+            window,
+            kind="N",
+            partner_id=partner_of(plus_emp),
+            anti_align=anti_align,
+        )
+        if ok_flip_n:
+            after_pairs = pairing.pair_hours_exclusive(
+                flip_sched_n,
+                code_of,
+                prev_pairs,
+                threshold_day=threshold_day,
+                skip_ids=intern_ids,
+            )
+            after_map = {
+                _pair_key(a, b): (a, b, h_d, h_n, h_t)
+                for a, b, h_d, h_n, h_t in after_pairs
+            }
+            before_ht = before_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
+            after_ht = after_map.get(pair_id, (emp_a, emp_b, 0, 0, 0))[4]
+            d_pair = after_ht - before_ht
+            after_same_office = _same_office_overlap_hours(
+                flip_sched_n, code_of, emp_a, emp_b, ordered_dates, window_days
+            )
+            so_ok = after_same_office <= before_same_office
+            d_solo = _solo_in_window(flip_sched_n, code_of, ordered_dates, window_days, plus_emp) - base_solo_plus
+            verdict = "ACCEPT" if (d_solo <= 0 and so_ok) else "REJECT"
+            summary = (
+                f"{plus_emp}: op=flipN window=[{w0.isoformat()}..{w1.isoformat()}] "
+                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δhours_pred=0 Σpred={pred_hours_cum} -> {verdict}"
+            )
+            apply_log.append(summary)
+            if verdict == "ACCEPT":
+                ops_log.append(summary)
+                cur_sched = flip_sched_n
+                ordered_dates = sorted(cur_sched.keys())
+                base_pairs_hours = after_pairs
+                base_score = sum(item[4] for item in base_pairs_hours)
+                ops += 1
+                moved.add(plus_emp)
+                continue
+
+        if not ok_flip_d and note_flip_d:
+            apply_log.append(f"{minus_emp}: op=flipD {note_flip_d}")
+        if not ok_flip_n and note_flip_n:
+            apply_log.append(f"{plus_emp}: op=flipN {note_flip_n}")
 
     solo_after = cov.solo_days_by_employee(cur_sched, code_of)
     after_pairs = pairing.pair_hours_exclusive(

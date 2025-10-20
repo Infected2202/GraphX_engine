@@ -321,3 +321,47 @@ def phase_shift_plus_one_insert_off(
     return schedule, 0, False, "phase_shift_+1: no place O,O,(work)"
 
 
+def flip_ab_on_next_token(
+    schedule,
+    code_of,
+    emp_id: str,
+    window: Tuple[date, date],
+    *,
+    kind: str = "D",
+    partner_id: Optional[str] = None,
+    anti_align: bool = True,
+):
+    days_all = sorted(schedule.keys())
+    w0, w1 = window
+    days = [d for d in days_all if w0 <= d <= w1]
+    if not days:
+        return schedule, 0, False, "flip_ab: empty window"
+
+    start_day: Optional[date] = None
+    for d in days:
+        tok = _tok_for_pair(_emp_code_on(schedule, code_of, emp_id, d), d)
+        if tok == kind:
+            start_day = d
+            break
+    if start_day is None:
+        return schedule, 0, False, "flip_ab: no token"
+
+    start_idx = days_all.index(start_day)
+    tail_tokens = [
+        _tok_for_pair(_emp_code_on(schedule, code_of, emp_id, day), day)
+        for day in days_all[start_idx:]
+    ]
+
+    new_sched = copy.deepcopy(schedule)
+    rotor.stitch_into_schedule(
+        new_sched,
+        code_of,
+        emp_id,
+        start_day,
+        tail_tokens,
+        partner_id=partner_id,
+        anti_align=anti_align,
+    )
+    return new_sched, 0, True, f"flip_ab[{kind}]@{start_day.isoformat()}"
+
+

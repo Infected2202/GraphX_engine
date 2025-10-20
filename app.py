@@ -142,6 +142,28 @@ if __name__ == "__main__":
         metrics_days_path = out_dir / f"{base}_metrics_days.csv"
         report.write_metrics_employees_csv(str(metrics_emp_path), employees, schedule)
         report.write_metrics_days_csv(str(metrics_days_path), schedule)
+
+        if schedule:
+            last_day = max(schedule.keys())
+            next_year = last_day.year + (1 if last_day.month == 12 else 0)
+            next_month = 1 if last_day.month == 12 else last_day.month + 1
+            new_carry_out: List[Assignment] = []
+            for entry in schedule[last_day]:
+                code = gen.code_of(entry.shift_key).upper()
+                if code in {"N4A", "N4B"}:
+                    key = "n8_a" if code.endswith("A") else "n8_b"
+                    shift = gen.shift_types[key]
+                    new_carry_out.append(
+                        Assignment(
+                            entry.employee_id,
+                            date(next_year, next_month, 1),
+                            key,
+                            shift.hours,
+                            source="autofix",
+                        )
+                    )
+            carry_out = new_carry_out
+
         # Пары (после возможного баланса)
         pairs = pairing.compute_pairs(schedule, gen.code_of)
         pair_score_after = sum(p[2] for p in pairs)
