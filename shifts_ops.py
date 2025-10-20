@@ -81,6 +81,27 @@ def _emp_code_on(schedule, code_of, emp_id: str, d: date) -> str:
     return "OFF"
 
 
+def _swap_ab_code(code: str) -> str:
+    c = (code or "").upper()
+    if c == "DA":
+        return "DB"
+    if c == "DB":
+        return "DA"
+    if c == "M8A":
+        return "M8B"
+    if c == "M8B":
+        return "M8A"
+    if c == "E8A":
+        return "E8B"
+    if c == "E8B":
+        return "E8A"
+    if c == "NA":
+        return "NB"
+    if c == "NB":
+        return "NA"
+    return c
+
+
 def _emp_tok_on(schedule, code_of, emp_id: str, d: date) -> str:
     return _tok_for_pair(_emp_code_on(schedule, code_of, emp_id, d), d)
 
@@ -192,6 +213,33 @@ def _set_off(a) -> None:
     a.shift_key = "off"
     a.effective_hours = 0
     a.source = "phase_shift"
+
+
+def flip_ab_on_day(schedule, code_of, emp_id: str, d: date):
+    """Переворот офисной буквы сотрудника на конкретной дате."""
+
+    new_sched = copy.deepcopy(schedule)
+    for a in new_sched[d]:
+        if a.employee_id != emp_id:
+            continue
+        before = code_of(a.shift_key).upper()
+        if (d.day == 1 and before in {"N8A", "N8B"}) or before in {"N4A", "N4B"}:
+            return schedule, False, "flip_ab_on_day: protected code"
+        after = _swap_ab_code(before)
+        if after == before:
+            return schedule, False, "flip_ab_on_day: noop"
+        a.shift_key = _key_for_code(after)
+        if after in {"DA", "DB", "NA", "NB"}:
+            a.effective_hours = 12
+        elif after in {"M8A", "M8B", "E8A", "E8B", "N8A", "N8B"}:
+            a.effective_hours = 8
+        elif after in {"N4A", "N4B"}:
+            a.effective_hours = 4
+        else:
+            a.effective_hours = 0
+        a.source = "pair_desync"
+        return new_sched, True, f"flip_ab_on_day[{emp_id}] {before}->{after} {d.isoformat()}"
+    return schedule, False, "flip_ab_on_day: no row"
 
 
 def phase_shift_minus_one_skip(
@@ -363,5 +411,31 @@ def flip_ab_on_next_token(
         anti_align=anti_align,
     )
     return new_sched, 0, True, f"flip_ab[{kind}]@{start_day.isoformat()}"
+
+
+def desync_pair_month(schedule, code_of, emp_a: str, emp_b: str):
+    """Пост-проход по месяцу: рассинхронизация офисов для пары."""
+
+    new_sched = copy.deepcopy(schedule)
+    flips = 0
+    notes: List[str] = []
+    for d in sorted(new_sched.keys()):
+        ca = _emp_code_on(new_sched, code_of, emp_a, d)
+        cb = _emp_code_on(new_sched, code_of, emp_b, d)
+        ta = _tok_for_pair(ca, d)
+        tb = _tok_for_pair(cb, d)
+        if ta != tb or ta == "O":
+            continue
+        if ca.endswith("A") != cb.endswith("A"):
+            continue
+        if ca in {"N4A", "N4B"} or cb in {"N4A", "N4B"}:
+            continue
+        if d.day == 1 and (ca in {"N8A", "N8B"} or cb in {"N8A", "N8B"}):
+            continue
+        new_sched, ok, note = flip_ab_on_day(new_sched, code_of, emp_a, d)
+        if ok:
+            flips += 1
+            notes.append(note)
+    return new_sched, flips, notes
 
 

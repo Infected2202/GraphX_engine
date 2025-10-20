@@ -154,6 +154,11 @@ def _same_office_overlap_hours(
     return hours
 
 
+def _same_office_overlap_month(schedule, code_of, emp_a: str, emp_b: str) -> int:
+    days = sorted(schedule.keys())
+    return _same_office_overlap_hours(schedule, code_of, emp_a, emp_b, days, len(days))
+
+
 def apply_pair_breaking(
     schedule,
     employees,
@@ -216,6 +221,19 @@ def apply_pair_breaking(
         if a not in intern_ids and b not in intern_ids
     ]
 
+    fixed_pairs_cfg = cfg.get("fixed_pairs") or []
+    target_pairs: List[Tuple[str, str, int, int]] = []
+    if fixed_pairs_cfg:
+        for pair in fixed_pairs_cfg:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                continue
+            a, b = pair
+            if a in intern_ids or b in intern_ids:
+                continue
+            target_pairs.append((a, b, 0, 0))
+    else:
+        target_pairs = prev_exclusive
+
     moved: set[str] = set()
     pred_hours_cum = 0
     pred_zero_cnt = 0
@@ -225,7 +243,7 @@ def apply_pair_breaking(
         return f"{a}~{b}" if a < b else f"{b}~{a}"
 
     ops = 0
-    for emp_a, emp_b, _, _ in prev_exclusive:
+    for emp_a, emp_b, _, _ in target_pairs:
         if ops >= max_ops:
             break
         def partner_of(emp: str) -> str:
@@ -268,7 +286,10 @@ def apply_pair_breaking(
         pair_id = _pair_key(emp_a, emp_b)
 
         base_solo_minus = _solo_in_window(cur_sched, code_of, ordered_dates, window_days, minus_emp)
-        before_same_office = _same_office_overlap_hours(cur_sched, code_of, emp_a, emp_b, ordered_dates, window_days)
+        before_same_office = _same_office_overlap_hours(
+            cur_sched, code_of, emp_a, emp_b, ordered_dates, window_days
+        )
+        before_same_office_month = _same_office_overlap_month(cur_sched, code_of, emp_a, emp_b)
         dHpred1 = _delta_hours_pred_minus_one(cur_sched, code_of, minus_emp)
 
         test_sched = None
@@ -311,11 +332,19 @@ def apply_pair_breaking(
             after_same_office = _same_office_overlap_hours(
                 test_sched, code_of, emp_a, emp_b, ordered_dates, window_days
             )
+            after_same_office_month = _same_office_overlap_month(
+                test_sched, code_of, emp_a, emp_b
+            )
             so_ok = after_same_office <= before_same_office
-            verdict = "ACCEPT" if (d_pair < 0 and d_solo <= 0 and so_ok) else "REJECT"
+            so_month_ok = after_same_office_month <= before_same_office_month
+            verdict = (
+                "ACCEPT" if (d_pair < 0 and d_solo <= 0 and so_ok and so_month_ok) else "REJECT"
+            )
             summary = (
                 f"{minus_emp}: op=-1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δpair_excl={d_pair} Δsolo={d_solo} "
+                f"Δsame_office={after_same_office - before_same_office} "
+                f"Δsame_office_month={after_same_office_month - before_same_office_month} "
                 f"Δhours_pred={dHpred1} Σpred={pred_hours_cum + dHpred1} -> {verdict}"
             )
             apply_log.append(summary)
@@ -381,11 +410,17 @@ def apply_pair_breaking(
             after_same_office = _same_office_overlap_hours(
                 test_sched2, code_of, emp_a, emp_b, ordered_dates, window_days
             )
+            after_same_office_month = _same_office_overlap_month(
+                test_sched2, code_of, emp_a, emp_b
+            )
             so_ok = after_same_office <= before_same_office
-            verdict = "ACCEPT" if (d_solo <= 0 and so_ok) else "REJECT"
+            so_month_ok = after_same_office_month <= before_same_office_month
+            verdict = "ACCEPT" if (d_solo <= 0 and so_ok and so_month_ok) else "REJECT"
             summary = (
                 f"{plus_emp}: op=+1 window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δpair_excl={d_pair} Δsolo={d_solo} "
+                f"Δsame_office={after_same_office - before_same_office} "
+                f"Δsame_office_month={after_same_office_month - before_same_office_month} "
                 f"Δhours_pred={dHpred2} Σpred={pred_hours_cum + dHpred2} -> {verdict}"
             )
             apply_log.append(summary)
@@ -438,12 +473,20 @@ def apply_pair_breaking(
             after_same_office = _same_office_overlap_hours(
                 flip_sched_d, code_of, emp_a, emp_b, ordered_dates, window_days
             )
+            after_same_office_month = _same_office_overlap_month(
+                flip_sched_d, code_of, emp_a, emp_b
+            )
             so_ok = after_same_office <= before_same_office
-            d_solo = _solo_in_window(flip_sched_d, code_of, ordered_dates, window_days, minus_emp) - base_solo_minus
-            verdict = "ACCEPT" if (d_solo <= 0 and so_ok) else "REJECT"
+            so_month_ok = after_same_office_month <= before_same_office_month
+            d_solo = _solo_in_window(
+                flip_sched_d, code_of, ordered_dates, window_days, minus_emp
+            ) - base_solo_minus
+            verdict = "ACCEPT" if (d_solo <= 0 and so_ok and so_month_ok) else "REJECT"
             summary = (
                 f"{minus_emp}: op=flipD window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δpair_excl={d_pair} Δsolo={d_solo} "
+                f"Δsame_office={after_same_office - before_same_office} "
+                f"Δsame_office_month={after_same_office_month - before_same_office_month} "
                 f"Δhours_pred=0 Σpred={pred_hours_cum} -> {verdict}"
             )
             apply_log.append(summary)
@@ -487,12 +530,20 @@ def apply_pair_breaking(
             after_same_office = _same_office_overlap_hours(
                 flip_sched_n, code_of, emp_a, emp_b, ordered_dates, window_days
             )
+            after_same_office_month = _same_office_overlap_month(
+                flip_sched_n, code_of, emp_a, emp_b
+            )
             so_ok = after_same_office <= before_same_office
-            d_solo = _solo_in_window(flip_sched_n, code_of, ordered_dates, window_days, plus_emp) - base_solo_plus
-            verdict = "ACCEPT" if (d_solo <= 0 and so_ok) else "REJECT"
+            so_month_ok = after_same_office_month <= before_same_office_month
+            d_solo = _solo_in_window(
+                flip_sched_n, code_of, ordered_dates, window_days, plus_emp
+            ) - base_solo_plus
+            verdict = "ACCEPT" if (d_solo <= 0 and so_ok and so_month_ok) else "REJECT"
             summary = (
                 f"{plus_emp}: op=flipN window=[{w0.isoformat()}..{w1.isoformat()}] "
-                f"Δpair_excl={d_pair} Δsolo={d_solo} Δsame_office={after_same_office - before_same_office} "
+                f"Δpair_excl={d_pair} Δsolo={d_solo} "
+                f"Δsame_office={after_same_office - before_same_office} "
+                f"Δsame_office_month={after_same_office_month - before_same_office_month} "
                 f"Δhours_pred=0 Σpred={pred_hours_cum} -> {verdict}"
             )
             apply_log.append(summary)
@@ -512,6 +563,24 @@ def apply_pair_breaking(
             apply_log.append(f"{plus_emp}: op=flipN {note_flip_n}")
 
     solo_after = cov.solo_days_by_employee(cur_sched, code_of)
+
+    post_notes: List[str] = []
+    total_flips = 0
+    for a, b, _, _ in target_pairs:
+        before_so = _same_office_overlap_month(cur_sched, code_of, a, b)
+        fixed_sched, flips, notes = shifts_ops.desync_pair_month(cur_sched, code_of, a, b)
+        after_so = _same_office_overlap_month(fixed_sched, code_of, a, b)
+        if flips > 0 and after_so <= before_so:
+            cur_sched = fixed_sched
+            ordered_dates = sorted(cur_sched.keys())
+            total_flips += flips
+            post_notes.extend([f"{a}~{b}: {msg}" for msg in notes])
+
+    if total_flips:
+        ops_log.append(f"[pair_breaking.post] desync_same_office flips={total_flips}")
+        for note in post_notes:
+            ops_log.append("  " + note)
+
     after_pairs = pairing.pair_hours_exclusive(
         cur_sched,
         code_of,
