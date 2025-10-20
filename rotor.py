@@ -27,6 +27,14 @@ _CODE_HOURS = {
 }
 
 
+def _is_day(code: str) -> bool:
+    return code in DAY_CODES
+
+
+def _is_night(code: str) -> bool:
+    return code in NIGHT_CODES or code in N4 or code in N8
+
+
 def _code_on(schedule, code_of, emp_id: str, day: date) -> str:
     for assignment in schedule[day]:
         if assignment.employee_id == emp_id:
@@ -113,6 +121,29 @@ def stitch_into_schedule(schedule, code_of, emp_id: str, start_date: date, token
         return
     start_idx = days.index(start_date)
     state = infer_state(schedule, code_of, emp_id, start_date)
+
+    # Находим первую рабочую позицию (D или N) в ленте и «праймим» букву по фактическому коду,
+    # чтобы не сбить персональную фазу офисов сотрудника.
+    primed_day = False
+    primed_night = False
+    for offset, token in enumerate(tokens):
+        if primed_day and primed_night:
+            break
+        idx = start_idx + offset
+        if idx >= len(days):
+            break
+        day = days[idx]
+        current_code = _code_on(schedule, code_of, emp_id, day)
+        if token == "D" and not primed_day and _is_day(current_code):
+            ab = _ab_of(current_code)
+            if ab in ("A", "B"):
+                state.day_ab = "B" if ab == "A" else "A"
+                primed_day = True
+        elif token == "N" and not primed_night and _is_night(current_code):
+            ab = _ab_of(current_code)
+            if ab in ("A", "B"):
+                state.night_ab = "B" if ab == "A" else "A"
+                primed_night = True
 
     for offset, token in enumerate(tokens):
         idx = start_idx + offset
