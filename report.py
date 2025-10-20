@@ -172,6 +172,7 @@ def write_pairs_text_report(
     prev_days_total: Optional[int],
     curr_days_total: Optional[int],
     ops_log: List[str],
+    apply_log: Optional[List[str]] = None,
     pair_score_before: int,
     pair_score_after: int,
 ) -> str:
@@ -274,11 +275,14 @@ def write_pairs_text_report(
         f.write("\n")
 
         f.write("[pair_breaking.summary]\n")
-        accepted = sum(1 for line in ops_log if "-> ACCEPT" in line)
+        accepted = sum(1 for line in (apply_log or []) if "-> ACCEPT" in line)
         f.write(f"ops_applied≈{accepted}\n\n")
 
         f.write("[pair_breaking.ops]\n")
-        for line in ops_log:
+        filtered_ops = [
+            ln for ln in (ops_log or []) if "-> ACCEPT" not in ln and "-> REJECT" not in ln
+        ]
+        for line in filtered_ops:
             f.write(line + "\n")
 
     return path
@@ -373,12 +377,13 @@ def render_pairs_text_block(
         lines.append("")
 
     lines.append("[pair_breaking.summary]")
-    accepted = sum(1 for line in ops_log if "-> ACCEPT" in line)
+    accepted = sum(1 for line in (apply_log or []) if "-> ACCEPT" in line)
     lines.append(f"ops_applied≈{accepted}")
     lines.append("")
 
     lines.append("[pair_breaking.ops]")
-    lines += ops_log
+    filtered_ops = [ln for ln in (ops_log or []) if "-> ACCEPT" not in ln and "-> REJECT" not in ln]
+    lines += filtered_ops
     lines.append("")
 
     return "\n".join(lines)

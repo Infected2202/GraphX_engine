@@ -349,7 +349,6 @@ def apply_pair_breaking(
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
-                ops_log.append(summary)
                 ops_log.append(f"  tape.before: {_fmt_tape(cur_sched, code_of, minus_emp, w0, w1)}")
                 ops_log.append(f"  tape.after : {_fmt_tape(test_sched, code_of, minus_emp, w0, w1)}")
                 cur_sched = test_sched
@@ -425,7 +424,6 @@ def apply_pair_breaking(
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
-                ops_log.append(summary)
                 ops_log.append(f"  tape.before: {_fmt_tape(cur_sched, code_of, plus_emp, w0, w1)}")
                 ops_log.append(f"  tape.after : {_fmt_tape(test_sched2, code_of, plus_emp, w0, w1)}")
                 cur_sched = test_sched2
@@ -491,7 +489,6 @@ def apply_pair_breaking(
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
-                ops_log.append(summary)
                 cur_sched = flip_sched_d
                 ordered_dates = sorted(cur_sched.keys())
                 base_pairs_hours = after_pairs
@@ -548,7 +545,6 @@ def apply_pair_breaking(
             )
             apply_log.append(summary)
             if verdict == "ACCEPT":
-                ops_log.append(summary)
                 cur_sched = flip_sched_n
                 ordered_dates = sorted(cur_sched.keys())
                 base_pairs_hours = after_pairs

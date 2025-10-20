@@ -99,6 +99,10 @@ def _swap_ab_code(code: str) -> str:
         return "NB"
     if c == "NB":
         return "NA"
+    if c == "N4A":
+        return "N4B"
+    if c == "N4B":
+        return "N4A"
     return c
 
 
@@ -223,7 +227,7 @@ def flip_ab_on_day(schedule, code_of, emp_id: str, d: date):
         if a.employee_id != emp_id:
             continue
         before = code_of(a.shift_key).upper()
-        if (d.day == 1 and before in {"N8A", "N8B"}) or before in {"N4A", "N4B"}:
+        if d.day == 1 and before in {"N8A", "N8B"}:
             return schedule, False, "flip_ab_on_day: protected code"
         after = _swap_ab_code(before)
         if after == before:
@@ -427,8 +431,6 @@ def desync_pair_month(schedule, code_of, emp_a: str, emp_b: str):
         if ta != tb or ta == "O":
             continue
         if ca.endswith("A") != cb.endswith("A"):
-            continue
-        if ca in {"N4A", "N4B"} or cb in {"N4A", "N4B"}:
             continue
         if d.day == 1 and (ca in {"N8A", "N8B"} or cb in {"N8A", "N8B"}):
             continue

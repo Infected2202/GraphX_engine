@@ -193,6 +193,7 @@ if __name__ == "__main__":
             prev_days_total=prev_days_total,
             curr_days_total=curr_days_total,
             ops_log=ops_log,
+            apply_log=apply_log,
             pair_score_before=pair_score_before_pb,
             pair_score_after=pair_score_after_pb if CONFIG.get("pair_breaking", {}).get("enabled", False) else pair_score_after,
         )
