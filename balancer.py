@@ -577,6 +577,44 @@ def apply_pair_breaking(
         for note in post_notes:
             ops_log.append("  " + note)
 
+    # --- Дополнительно: пост-рассинхронизация по сильным парам текущего месяца ---
+    if bool(cfg.get("post_desync_all", True)):
+        curr_all_pairs = pairing.compute_pairs(cur_sched, code_of)
+        curr_exclusive = pairing.exclusive_matching_by_day(
+            curr_all_pairs, threshold_day=threshold_day
+        )
+        processed_pairs = {
+            (a, b) if a < b else (b, a) for (a, b, _, _) in target_pairs
+        }
+        extra_pairs = [
+            (a, b)
+            for (a, b, _, _) in curr_exclusive
+            if ((a, b) if a < b else (b, a)) not in processed_pairs
+            and a not in intern_ids
+            and b not in intern_ids
+        ]
+        post_all_notes: List[str] = []
+        post_all_flips = 0
+        for a, b in extra_pairs:
+            before_so = _same_office_overlap_month(cur_sched, code_of, a, b)
+            if before_so <= 0:
+                continue
+            fixed_sched, flips, notes = shifts_ops.desync_pair_month(
+                cur_sched, code_of, a, b
+            )
+            after_so = _same_office_overlap_month(fixed_sched, code_of, a, b)
+            if flips > 0 and after_so <= before_so:
+                cur_sched = fixed_sched
+                ordered_dates = sorted(cur_sched.keys())
+                post_all_flips += flips
+                post_all_notes.extend([f"{a}~{b}: " + n for n in notes])
+        if post_all_flips:
+            ops_log.append(
+                f"[pair_breaking.post_all] desync_same_office flips={post_all_flips}"
+            )
+            for msg in post_all_notes:
+                ops_log.append("  " + msg)
+
     after_pairs = pairing.pair_hours_exclusive(
         cur_sched,
         code_of,
