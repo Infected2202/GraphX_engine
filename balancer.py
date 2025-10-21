@@ -577,42 +577,55 @@ def apply_pair_breaking(
         for note in post_notes:
             ops_log.append("  " + note)
 
-    # --- Дополнительно: пост-рассинхронизация по сильным парам текущего месяца ---
+    # --- Дополнительно: глобальный пост-проход по всем сотрудникам ---
     if bool(cfg.get("post_desync_all", True)):
-        curr_all_pairs = pairing.compute_pairs(cur_sched, code_of)
-        curr_exclusive = pairing.exclusive_matching_by_day(
-            curr_all_pairs, threshold_day=threshold_day
-        )
-        processed_pairs = {
-            (a, b) if a < b else (b, a) for (a, b, _, _) in target_pairs
-        }
-        extra_pairs = [
-            (a, b)
-            for (a, b, _, _) in curr_exclusive
-            if ((a, b) if a < b else (b, a)) not in processed_pairs
-            and a not in intern_ids
-            and b not in intern_ids
-        ]
-        post_all_notes: List[str] = []
-        post_all_flips = 0
-        for a, b in extra_pairs:
-            before_so = _same_office_overlap_month(cur_sched, code_of, a, b)
+        emp_ids = sorted([e.id for e in employees if e.id not in intern_ids])
+
+        def _month_overlap(a: str, b: str) -> int:
+            return _same_office_overlap_month(cur_sched, code_of, a, b)
+
+        best_partner: Dict[str, Tuple[str, int]] = {}
+        for a in emp_ids:
+            partner_id = None
+            partner_so = 0
+            for b in emp_ids:
+                if a == b:
+                    continue
+                so = _month_overlap(a, b)
+                if so > partner_so:
+                    partner_id, partner_so = b, so
+            if partner_id and partner_so > 0:
+                best_partner[a] = (partner_id, partner_so)
+
+        candidates: Dict[Tuple[str, str], int] = {}
+        for a, (b, so) in best_partner.items():
+            key = (a, b) if a < b else (b, a)
+            if key not in candidates or so > candidates[key]:
+                candidates[key] = so
+
+        processed = {(a, b) if a < b else (b, a) for (a, b, _, _) in target_pairs}
+
+        extra_flips = 0
+        extra_notes: List[str] = []
+        for (a, b), so in sorted(candidates.items(), key=lambda item: item[1], reverse=True):
+            if (a, b) in processed:
+                continue
+            before_so = _month_overlap(a, b)
             if before_so <= 0:
                 continue
-            fixed_sched, flips, notes = shifts_ops.desync_pair_month(
-                cur_sched, code_of, a, b
-            )
+            fixed_sched, flips, notes = shifts_ops.desync_pair_month(cur_sched, code_of, a, b)
             after_so = _same_office_overlap_month(fixed_sched, code_of, a, b)
-            if flips > 0 and after_so <= before_so:
+            if flips > 0 and after_so < before_so:
                 cur_sched = fixed_sched
                 ordered_dates = sorted(cur_sched.keys())
-                post_all_flips += flips
-                post_all_notes.extend([f"{a}~{b}: " + n for n in notes])
-        if post_all_flips:
+                extra_flips += flips
+                extra_notes.extend([f"{a}~{b}: " + note for note in notes])
+
+        if extra_flips:
             ops_log.append(
-                f"[pair_breaking.post_all] desync_same_office flips={post_all_flips}"
+                f"[pair_breaking.post_all] desync_same_office flips={extra_flips}"
             )
-            for msg in post_all_notes:
+            for msg in extra_notes:
                 ops_log.append("  " + msg)
 
     after_pairs = pairing.pair_hours_exclusive(
