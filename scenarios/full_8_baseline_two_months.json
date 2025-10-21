@@ -1,0 +1,28 @@
+{
+  "name": "full_8_baseline_two_months",
+  "employees": [
+    {"id": "E01", "name": "Сотрудник 1"},
+    {"id": "E02", "name": "Сотрудник 2"},
+    {"id": "E03", "name": "Сотрудник 3"},
+    {"id": "E04", "name": "Сотрудник 4"},
+    {"id": "E05", "name": "Сотрудник 5"},
+    {"id": "E06", "name": "Сотрудник 6"},
+    {"id": "E07", "name": "Сотрудник 7"},
+    {"id": "E08", "name": "Сотрудник 8"}
+  ],
+  "config": {
+    "use_preset_vacations": true,
+    "pair_breaking": {
+      "enabled": true,
+      "window_days": 6,
+      "overlap_threshold": 6,
+      "max_ops": 4,
+      "hours_budget": 12,
+      "post_desync_include_current": true
+    },
+    "months": [
+      {"ym": "2025-09"},
+      {"ym": "2025-10"}
+    ]
+  }
+}
