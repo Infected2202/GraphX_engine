@@ -28,11 +28,11 @@ def _code_of(shift_key: str) -> str:
 
 
 def _tok(code: str) -> str:
-    """D/N/O-токен для baseline-проверки. N4/N8 → N, VAC → O."""
+    """D/N/O-токен для baseline-проверки. N4 → N, N8 трактуем как O."""
     c = (code or "").upper()
     if c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
         return "D"
-    if c in {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}:
+    if c in {"NA", "NB", "N4A", "N4B"}:
         return "N"
     # OFF, VAC8, VAC0 и прочее — считаем «вне цикла» (O)
     return "O"
@@ -57,7 +57,7 @@ def validate_baseline(
 ) -> List[str]:
     """
     Базовая проверка паттерна с «якорем» = 1-е число текущего месяца.
-    Используем фактический токен на 1-е (с учётом N4/N8→N, VAC→O) как старт цикла D→N→O→O.
+    Используем фактический токен на 1-е (с учётом N4→N, N8→O, VAC→O) как старт цикла D→N→O→O.
     Это учитывает carry-in и переносы.
     """
     issues: List[str] = []
@@ -66,24 +66,54 @@ def validate_baseline(
         return issues
     d0 = dates[0]
 
-    actual_tok: Dict[Tuple[date, str], str] = {}
     actual_code: Dict[Tuple[date, str], str] = {}
     for d in dates:
         for a in schedule[d]:
             code = code_of(a.shift_key).upper()
             actual_code[(d, a.employee_id)] = code
-            actual_tok[(d, a.employee_id)] = _tok(code)
 
-    cycle = ["D", "N", "O", "O"]
-    idx_of = {"D": 0, "N": 1, "O": 2}
+    cycle = ["D", "N", "O", "O"]  # 0,1,2,3
+    idx_of = {"D": 0, "N": 1, "O": 2}  # NB: O может быть и 2, и 3 — разрулим ниже
+
+    def _first_non_vac_index(eid: str) -> int | None:
+        for i, d in enumerate(dates):
+            code = actual_code.get((d, eid), "OFF")
+            if code not in {"VAC8", "VAC0"}:
+                return i
+        return None
+
+    def _choose_start(eid: str) -> int:
+        """Старт цикла на 1-е: N8* => O2, иначе — по первому не-VAC дню с учётом O2/O3."""
+        code_d1 = actual_code.get((d0, eid), "OFF").upper()
+        if code_d1 in {"N8A", "N8B"}:
+            return 2
+        idx = _first_non_vac_index(eid)
+        if idx is None:
+            return 2
+        tok = _tok(actual_code.get((dates[idx], eid), "OFF"))
+        if tok != "O":
+            return (idx_of[tok] - idx) % 4
+        best_start, best_mis = 2, 10 ** 9
+        for o_start in (2, 3):
+            mis = 0
+            for i, d in enumerate(dates):
+                code = actual_code.get((d, eid), "OFF")
+                if ignore_vacations and code in {"VAC8", "VAC0"}:
+                    continue
+                exp = cycle[(o_start + i) % 4]
+                act = _tok(code)
+                if exp != act:
+                    mis += 1
+            if mis < best_mis:
+                best_start, best_mis = o_start, mis
+        return best_start
 
     for e in employees:
-        base_tok = actual_tok.get((d0, e.id), "O")
-        start = idx_of.get(base_tok, 2)
+        start = _choose_start(e.id)
         for i, d in enumerate(dates):
             exp = cycle[(start + i) % 4]
-            code = actual_code.get((d, e.id), "OFF")
-            act = actual_tok.get((d, e.id), "O")
+            code = actual_code.get((d, e.id), "OFF").upper()
+            act = _tok(code)
             if ignore_vacations and code in {"VAC8", "VAC0"}:
                 continue
             if act != exp:
@@ -94,7 +124,7 @@ def validate_baseline(
 
 # Доп. «мягкая» проверка/лог по первым дням месяца (smoke): DA/DB/A/B-сплит
 def coverage_smoke(ym, schedule, code_of, first_days: int = 8):
-    """Сводка по первым дням месяца с учётом N4/N8 как ночных."""
+    """Сводка по первым дням месяца с учётом N4 как ночных (N8 считаем OFF)."""
     dates = sorted(schedule.keys())[:first_days]
     rows = []
     for d in dates:
@@ -105,9 +135,9 @@ def coverage_smoke(ym, schedule, code_of, first_days: int = 8):
                 da += 1
             elif c == "DB":
                 db += 1
-            elif c in {"NA", "N4A", "N8A"}:
+            elif c in {"NA", "N4A"}:
                 na += 1
-            elif c in {"NB", "N4B", "N8B"}:
+            elif c in {"NB", "N4B"}:
                 nb += 1
         rows.append((d.isoformat(), da, db, na, nb))
     return rows
@@ -121,15 +151,45 @@ def phase_trace(ym, employees, schedule, code_of, gen = None, days: int = 10):
     idx_of = {"D": 0, "N": 1, "O": 2}
     out = []
     for e in employees:
-        act = []
+        act: List[str] = []
+        codes: List[str | None] = []
         for d in dates:
             code = None
             for a in schedule[d]:
                 if a.employee_id == e.id:
                     code = code_of(a.shift_key).upper()
                     break
+            codes.append(code)
             act.append(_tok(code or "OFF"))
-        start = idx_of.get(act[0], 2)
-        exp = [cycle[(start + i) % 4] for i in range(len(dates))]
+
+        def choose_start_from_act() -> int:
+            if not dates:
+                return 2
+            day1_code = None
+            for a in schedule[dates[0]]:
+                if a.employee_id == e.id:
+                    day1_code = code_of(a.shift_key).upper()
+                    break
+            if day1_code in {"N8A", "N8B"}:
+                return 2
+            nonvac = None
+            for i, code in enumerate(codes):
+                c = (code or "OFF").upper()
+                if c not in {"VAC8", "VAC0"}:
+                    nonvac = i
+                    break
+            if nonvac is None:
+                return 2
+            tok = act[nonvac]
+            if tok != "O":
+                return (idx_of[tok] - nonvac) % 4
+            candidates = [
+                (2, sum(1 for i, t in enumerate(act) if t != cycle[(2 + i) % 4])),
+                (3, sum(1 for i, t in enumerate(act) if t != cycle[(3 + i) % 4])),
+            ]
+            return min(candidates, key=lambda x: x[1])[0]
+
+        start = choose_start_from_act()
+        exp = [cycle[(start + i) % 4] for i in range(len(act))]
         out.append(f"{e.id}: exp={' '.join(exp)} | act={' '.join(act)}")
     return out

@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import os
 
 from config import CONFIG as BASE_CONFIG
@@ -150,6 +150,7 @@ def run_scenario(scn: dict, out_root: Path):
     prev_tail_by_emp = {}
     carry_in = []
     solo_months_counter: Dict[str,int] = {}
+    prev_pairs_for_month: Optional[List[Tuple[str, str, int, int]]] = None
 
     # 4) по месяцам
     for idx, month_spec in enumerate(cfg2["months"]):
@@ -174,11 +175,25 @@ def run_scenario(scn: dict, out_root: Path):
             prev_tail_by_emp=prev_tail_by_emp
         )
 
+        # baseline-validator до балансировки
+        baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
+
         # балансировка пар (safe-mode в начале месяца)
         pairs_before = pairing.compute_pairs(schedule, gen.code_of)
-        schedule_balanced, ops_log, _solo_after = balancer.apply_pair_breaking(
-            schedule, employees, month_spec_eff.get("norm_hours_month", 0),
-            pairs_before, cfg2.get("pair_breaking", {}), gen.code_of, solo_months_counter
+        pb_cfg = dict(cfg2.get("pair_breaking", {}) or {})
+        prev_pairs_hint = scn.get("prev_pairs_for_month") or scn.get("prev_pairs") or prev_pairs_for_month or []
+        pb_cfg.setdefault("prev_pairs", prev_pairs_hint)
+        if "intern_ids" in scn:
+            pb_cfg["intern_ids"] = scn["intern_ids"]
+        schedule_balanced, ops_log, _solo_after, pair_score_before, pair_score_after, apply_log = balancer.apply_pair_breaking(
+            schedule,
+            employees,
+            gen.code_of,
+            pb_cfg,
+        )
+        print(
+            f"[pairs.score] before={pair_score_before} after={pair_score_after} "
+            f"Δ={pair_score_after - pair_score_before}"
         )
         if cfg2.get("pair_breaking", {}).get("enabled", False):
             schedule = schedule_balanced
@@ -186,8 +201,29 @@ def run_scenario(scn: dict, out_root: Path):
         # пост-перекраска отпусков (VAC8/VAC0)
         postprocess.apply_vacations(schedule, eff_vacations, gen.shift_types)
 
-        # валидации
-        baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
+        # пересчёт carry_out после всех сдвигов
+        if schedule:
+            last_day = max(schedule.keys())
+            next_year = last_day.year + (1 if last_day.month == 12 else 0)
+            next_month = 1 if last_day.month == 12 else last_day.month + 1
+            new_carry_out: List[Assignment] = []
+            for entry in schedule[last_day]:
+                code = gen.code_of(entry.shift_key).upper()
+                if code in {"N4A", "N4B"}:
+                    key = "n8_a" if code.endswith("A") else "n8_b"
+                    st = gen.shift_types[key]
+                    new_carry_out.append(
+                        Assignment(
+                            entry.employee_id,
+                            date(next_year, next_month, 1),
+                            key,
+                            st.hours,
+                            source="autofix",
+                        )
+                    )
+            carry_out = new_carry_out
+
+        # валидации и диагностика
         smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=cfg2.get("pair_breaking",{}).get("window_days",6)+2)
         trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
 
@@ -216,10 +252,13 @@ def run_scenario(scn: dict, out_root: Path):
             log_lines.append(f"[carry_in] {ym}-01: {ap}")
         if cfg2.get("pair_breaking", {}).get("enabled", False):
             log_lines.append("[pair_breaking.apply]")
-            if ops_log:
-                log_lines.extend([f" - {x}" for x in ops_log])
+            if apply_log:
+                log_lines.extend([f" - {x}" for x in apply_log])
             else:
                 log_lines.append(" - no-ops")
+            if ops_log:
+                log_lines.append("[pair_breaking.ops]")
+                log_lines.extend([f" - {x}" for x in ops_log])
             log_lines.append("[coverage.smoke.first-days]")
             for row in smoke:
                 log_lines.append(f" {row[0]}: DA={row[1]} DB={row[2]} NA={row[3]} NB={row[4]}")
@@ -240,6 +279,37 @@ def run_scenario(scn: dict, out_root: Path):
             log_lines.extend([f" {ln}" for ln in trace])
         log_path = out_dir / f"{base}_log.txt"
         report.write_log_txt(str(log_path), log_lines)
+
+        pb_cfg = cfg2.get("pair_breaking", {}) or {}
+        threshold_day = int(pb_cfg.get("overlap_threshold", 8))
+        window_days = int(pb_cfg.get("window_days", 6))
+        max_ops = int(pb_cfg.get("max_ops", 4))
+        hours_budget = int(pb_cfg.get("hours_budget", 0))
+
+        try:
+            curr_days_total = max([p[2] for p in pairs_after] or [0]) or None
+        except Exception:
+            curr_days_total = None
+
+        appended_log_path = report.append_pairs_to_log(
+            out_dir=str(out_dir),
+            ym=base,
+            threshold_day=threshold_day,
+            window_days=window_days,
+            max_ops=max_ops,
+            hours_budget=hours_budget,
+            prev_pairs=prev_pairs_for_month,
+            curr_pairs=pairs_after,
+            curr_days_total=curr_days_total,
+            apply_log=apply_log if apply_log else ops_log[:],
+            ops_log=ops_log,
+            pair_score_before=pair_score_before,
+            pair_score_after=pair_score_after,
+        )
+        print(f"[report.pairs->_log] appended: {appended_log_path}")
+
+        prev_pairs_for_month = pairs_after
+        scn["prev_pairs_for_month"] = prev_pairs_for_month
 
         # хвост → следующий месяц
         prev_tail_by_emp = extract_tail(schedule, employees, gen)

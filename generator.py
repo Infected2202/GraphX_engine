@@ -213,6 +213,8 @@ class Generator:
         # Инициализация расписания
         schedule: Dict[date, List[Assignment]] = {d: [] for d in self.iter_month_days(y, m)}
 
+        first_day = date(y, m, 1)
+
         # Инициализируем состояние по хвосту прошлого месяца (до 4 дней)
         # Ставим bootstrap: равномерные фазы 0,1,2,3 и начальная дневная A/B пополам по списку
         phase_map: Dict[str, int] = {}
@@ -241,7 +243,10 @@ class Generator:
                 next_day_parity[e.id] = 0 if (idx_free % 2 == 0) else 1
                 idx_free += 1
 
-        # Применяем carry-in (обычно N8* на 1-е число) — только для актуальных сотрудников
+        # Применяем carry-in — только для актуальных сотрудников.
+        # ВАЖНО: если 1-го стоит N8*, это хвост ночи (часы = 8), но для фазового цикла
+        # он считается OFF-днём. Чтобы получить последовательность … N4 | N8(1-е=O2) | O3 | D …,
+        # стартовую фазу фиксируем на O2 (=2).
         if carry_in:
             existing = {e.id for e in employees}
             for a in carry_in:
@@ -250,7 +255,14 @@ class Generator:
                 if a.date in schedule:
                     schedule[a.date] = [x for x in schedule[a.date] if x.employee_id != a.employee_id]
                     schedule[a.date].append(a)
-                # перенос N8* не влияет на phase/next_day_parity (это продолжение ночи прошлого месяца)
+                # Если это 1-е число и код N8A/N8B — корректируем стартовую фазу на O2.
+                if a.date == first_day:
+                    code = self.code_of(a.shift_key).upper()
+                    if code in {"N8A", "N8B"}:
+                        # Стартуем с OFF-фазы (O2). Основной цикл инкрементирует фазу даже в дни
+                        # со скипом из-за carry-in, поэтому получаем: N4 | N8(=O2) | O3 | D0.
+                        phase_map[a.employee_id] = 2  # O2
+                        # Паритет дневного офиса не меняем: он применяется только на DAY.
 
         # Построение шаблона по дням
         carry_out: List[Assignment] = []  # N8* на 1-е след. месяца
