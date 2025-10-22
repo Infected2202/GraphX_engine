@@ -28,7 +28,13 @@ def daterange(d1: date, d2: date) -> List[date]:
 
 def deep_copy_config(cfg: dict) -> dict:
     out = {k: v for k, v in cfg.items()}
-    out["months"] = [dict(m) for m in cfg["months"]]
+    months_copy: List[dict] = []
+    for m in cfg.get("months", []):
+        m_copy = dict(m)
+        if "vacations" in m_copy and m_copy["vacations"]:
+            m_copy["vacations"] = {eid: list(ds) for eid, ds in m_copy["vacations"].items()}
+        months_copy.append(m_copy)
+    out["months"] = months_copy
     out["employees"] = [dict(e) for e in cfg["employees"]]
     out["shift_types"] = {k: dict(v) for k, v in cfg["shift_types"].items()}
     if "logging" in out: out["logging"] = dict(out["logging"])
@@ -42,15 +48,57 @@ def filter_employees(cfg: dict, keep_ids: List[str]) -> dict:
     cfg2["employees"] = [e for e in cfg2["employees"] if e["id"] in keep]
     return cfg2
 
-def merge_vacations(cfg: dict, extra_vac: Dict[str, List[date]]) -> dict:
+def _as_date(value) -> date:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    raise TypeError(f"Unsupported vacation date value: {value!r}")
+
+
+def _expand_vacation_entry(entry) -> List[date]:
+    if entry is None:
+        return []
+    if isinstance(entry, (list, tuple, set)):
+        out: List[date] = []
+        for item in entry:
+            out.extend(_expand_vacation_entry(item))
+        return out
+    if isinstance(entry, dict):
+        start_raw = entry.get("start") or entry.get("from")
+        end_raw = entry.get("end") or entry.get("to") or start_raw
+        if not start_raw:
+            return []
+        start = _as_date(start_raw)
+        end = _as_date(end_raw)
+        if end < start:
+            start, end = end, start
+        return daterange(start, end)
+    return [_as_date(entry)]
+
+
+def normalize_vacations_map(raw_map: Dict[str, object] | None) -> Dict[str, List[date]]:
+    if not raw_map:
+        return {}
+    norm: Dict[str, List[date]] = {}
+    for eid, spec in raw_map.items():
+        days = _expand_vacation_entry(spec)
+        if not days:
+            continue
+        norm[eid] = sorted(set(days))
+    return norm
+
+
+def merge_vacations(cfg: dict, extra_vac: Dict[str, object]) -> dict:
     """Добавляет даты отпусков во ВСЕ month_spec; фактическое применение отфильтруем по окну месяца ниже."""
     cfg2 = deep_copy_config(cfg)
+    extra_norm = normalize_vacations_map(extra_vac)
     for ms in cfg2["months"]:
-        vac = dict(ms.get("vacations", {}) or {})
-        for eid, dates in (extra_vac or {}).items():
+        vac = {eid: list(ds) for eid, ds in (ms.get("vacations", {}) or {}).items()}
+        for eid, dates in extra_norm.items():
             vac.setdefault(eid, [])
             vac[eid].extend(dates)
-        ms["vacations"] = vac
+        ms["vacations"] = {eid: sorted(set(ds)) for eid, ds in vac.items() if ds}
     return cfg2
 
 def month_bounds(gen: Generator, ym: str) -> Tuple[date, date]:
@@ -213,7 +261,12 @@ def build_config_from_scenario(base_cfg: dict, scn: dict) -> Tuple[dict, List[st
             if "norm_hours_month" in ms:
                 month_cfg["norm_hours_month"] = ms["norm_hours_month"]
             if "vacations" in ms:
-                month_cfg["vacations"] = ms["vacations"]
+                existing = {eid: list(ds) for eid, ds in (month_cfg.get("vacations", {}) or {}).items()}
+                parsed = normalize_vacations_map(ms.get("vacations"))
+                for eid, dates in parsed.items():
+                    existing.setdefault(eid, [])
+                    existing[eid].extend(dates)
+                month_cfg["vacations"] = {eid: sorted(set(ds)) for eid, ds in existing.items() if ds}
             elif not scn_cfg.get("use_preset_vacations", True):
                 month_cfg["vacations"] = {}
             new_months.append(month_cfg)

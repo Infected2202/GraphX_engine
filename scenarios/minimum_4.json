@@ -17,7 +17,12 @@
       "post_desync_include_current": true
     },
     "months": [
-      {"ym": "2025-09"}
+      {
+        "ym": "2025-09",
+        "vacations": {
+          "E03": [{"start": "2025-09-08", "end": "2025-09-14"}]
+        }
+      }
     ]
   }
 }
