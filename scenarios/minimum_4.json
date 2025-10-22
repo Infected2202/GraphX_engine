@@ -1,0 +1,23 @@
+{
+  "name": "minimum_4",
+  "employees": [
+    {"id": "E01", "name": "Сотрудник 1"},
+    {"id": "E02", "name": "Сотрудник 2"},
+    {"id": "E03", "name": "Сотрудник 3"},
+    {"id": "E04", "name": "Сотрудник 4"}
+  ],
+  "config": {
+    "use_preset_vacations": true,
+    "pair_breaking": {
+      "enabled": true,
+      "window_days": 6,
+      "overlap_threshold": 4,
+      "max_ops": 3,
+      "hours_budget": 12,
+      "post_desync_include_current": true
+    },
+    "months": [
+      {"ym": "2025-09"}
+    ]
+  }
+}
