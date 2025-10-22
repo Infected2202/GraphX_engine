@@ -1,0 +1,48 @@
+{
+  "name": "interns_8",
+  "employees": [
+    {"id": "E01", "name": "Сотрудник 1"},
+    {"id": "E02", "name": "Сотрудник 2"},
+    {"id": "E03", "name": "Сотрудник 3"},
+    {"id": "E04", "name": "Сотрудник 4"},
+    {"id": "E05", "name": "Сотрудник 5"},
+    {"id": "E06", "name": "Сотрудник 6", "intern": true},
+    {"id": "E07", "name": "Сотрудник 7"},
+    {"id": "E08", "name": "Сотрудник 8", "intern": true}
+  ],
+  "config": {
+    "use_preset_vacations": true,
+    "pair_breaking": {
+      "enabled": true,
+      "window_days": 6,
+      "overlap_threshold": 6,
+      "max_ops": 4,
+      "hours_budget": 12,
+      "post_desync_include_current": true
+    },
+    "months": [
+      {"ym": "2025-09"},
+      {"ym": "2025-10"}
+    ]
+  },
+  "vacations": [
+    {
+      "employee_id": "E01",
+      "start": "2025-09-05",
+      "end": "2025-09-11",
+      "note": "Отпуск только у боевого сотрудника"
+    },
+    {
+      "employee_id": "E03",
+      "start": "2025-10-10",
+      "end": "2025-10-23",
+      "note": "Глубокий 14-дневный блок в октябре"
+    },
+    {
+      "employee_id": "E07",
+      "start": "2025-10-25",
+      "end": "2025-10-31",
+      "note": "Поздний 7-дневный блок: проверка хвостов"
+    }
+  ]
+}

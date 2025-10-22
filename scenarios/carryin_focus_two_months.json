@@ -1,0 +1,48 @@
+{
+  "name": "carryin_focus_two_months",
+  "employees": [
+    {"id": "E01", "name": "Сотрудник 1"},
+    {"id": "E02", "name": "Сотрудник 2"},
+    {"id": "E03", "name": "Сотрудник 3"},
+    {"id": "E04", "name": "Сотрудник 4"},
+    {"id": "E05", "name": "Сотрудник 5"},
+    {"id": "E06", "name": "Сотрудник 6"},
+    {"id": "E07", "name": "Сотрудник 7"},
+    {"id": "E08", "name": "Сотрудник 8"}
+  ],
+  "config": {
+    "use_preset_vacations": true,
+    "pair_breaking": {
+      "enabled": true,
+      "window_days": 6,
+      "overlap_threshold": 6,
+      "max_ops": 4,
+      "hours_budget": 12,
+      "post_desync_include_current": true
+    },
+    "months": [
+      {"ym": "2025-10"},
+      {"ym": "2025-11"}
+    ]
+  },
+  "vacations": [
+    {
+      "employee_id": "E02",
+      "start": "2025-10-25",
+      "end": "2025-11-07",
+      "note": "14 дней через границу 10-11: проверка переносов"
+    },
+    {
+      "employee_id": "E08",
+      "start": "2025-10-03",
+      "end": "2025-10-09",
+      "note": "Ранний октябрь: проверка старта месяца с carry-in"
+    },
+    {
+      "employee_id": "E05",
+      "start": "2025-11-12",
+      "end": "2025-11-18",
+      "note": "Средина ноября: устойчивость во втором месяце"
+    }
+  ]
+}

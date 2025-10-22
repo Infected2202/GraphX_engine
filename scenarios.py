@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-import os
+from glob import glob
+import json
 
 from config import CONFIG as BASE_CONFIG
 from generator import Generator, Assignment
@@ -107,35 +108,241 @@ def extract_tail(schedule, employees, gen: Generator) -> Dict[str, List[str]]:
 # Сценарии
 # ---------------------------------------------------------------------------
 
-def scenarios_def() -> List[dict]:
-    """Набор быстрых сценариев: мощности 4–8, отпуска на стыке, проверка балансира."""
-    return [
-        # База 8 сотрудников, балансер выключен (контрольная)
-        {"name":"S_base_8_bal_off", "keep_ids":["E01","E02","E03","E04","E05","E06","E07","E08"], "vacations":{}, "pair_breaking_enabled":False},
-        # База 8 сотрудников, балансер включен
-        {"name":"S_base_8_bal_on",  "keep_ids":["E01","E02","E03","E04","E05","E06","E07","E08"], "vacations":{}, "pair_breaking_enabled":True},
-        # 7 сотрудников, балансер включен
-        {"name":"S_7_bal_on",       "keep_ids":["E01","E02","E03","E04","E05","E06","E07"],       "vacations":{}, "pair_breaking_enabled":True},
-        # 5 сотрудников (соло-нагрузка), балансер включен
-        {"name":"S_5_solo_bal_on",  "keep_ids":["E01","E02","E03","E04","E05"],                  "vacations":{}, "pair_breaking_enabled":True},
-        # Отпуск E08 (конец августа + начало сентября), балансер включен
-        {"name":"S_vac_E08_cross",  "keep_ids":["E01","E02","E03","E04","E05","E06","E07","E08"], "vacations":{"E08": daterange(date(2025,8,26), date(2025,9,3))}, "pair_breaking_enabled":True},
-        # Отпуск E07 (первые числа сентября), балансер включен
-        {"name":"S_vac_E07_sep",    "keep_ids":["E01","E02","E03","E04","E05","E06","E07","E08"], "vacations":{"E07": daterange(date(2025,9,1), date(2025,9,6))}, "pair_breaking_enabled":True},
-    ]
+SCENARIOS_DIR = Path(__file__).parent / "scenarios"
+
+def _ensure_defaults(scn: dict) -> dict:
+    """
+    Мягко подставляет дефолты, если чего-то нет в JSON.
+    Без добавления новых, неиспользуемых ключей.
+    """
+    scn = dict(scn or {})
+    scn.setdefault("employees", [])
+    scn.setdefault("config", {})
+    cfg = scn["config"]
+    cfg.setdefault("use_preset_vacations", True)
+    pb = cfg.setdefault("pair_breaking", {})
+    pb.setdefault("enabled", True)
+    pb.setdefault("window_days", 6)
+    pb.setdefault("overlap_threshold", 6)
+    pb.setdefault("max_ops", 4)
+    pb.setdefault("hours_budget", 12)
+    pb.setdefault("post_desync_include_current", True)
+    cfg.setdefault("months", [])
+    scn.setdefault("vacations", [])
+    return scn
+
+
+def _parse_iso_date(value) -> Optional[date]:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_vacations_payload(raw) -> Dict[str, List[date]]:
+    """Превращает произвольную структуру отпусков в {emp_id: [date, ...]}"""
+
+    def add_dates(mapping: Dict[str, List[date]], emp_id: str, dates: List[date]):
+        if not emp_id or not dates:
+            return
+        bucket = mapping.setdefault(emp_id, [])
+        for d in dates:
+            if d not in bucket:
+                bucket.append(d)
+
+    result: Dict[str, List[date]] = {}
+    if not raw:
+        return result
+
+    # Допускаем старый формат {"E01": ["2025-09-01", ...]} и новый список объектов
+    if isinstance(raw, dict):
+        iterable = []
+        for emp_id, spec in raw.items():
+            iterable.append({"employee_id": emp_id, "dates": spec})
+    elif isinstance(raw, list):
+        iterable = list(raw)
+    else:
+        return result
+
+    for item in iterable:
+        if not isinstance(item, dict):
+            continue
+        emp_id = item.get("employee_id") or item.get("id")
+        dates_block: List[date] = []
+
+        # Список дат
+        raw_dates = item.get("dates")
+        if isinstance(raw_dates, list):
+            for entry in raw_dates:
+                if isinstance(entry, list) and len(entry) == 2:
+                    start = _parse_iso_date(entry[0])
+                    end = _parse_iso_date(entry[1]) or start
+                    if start and end:
+                        for d in daterange(min(start, end), max(start, end)):
+                            dates_block.append(d)
+                    continue
+                dt = _parse_iso_date(entry)
+                if dt:
+                    dates_block.append(dt)
+        elif isinstance(raw_dates, str):
+            dt = _parse_iso_date(raw_dates)
+            if dt:
+                dates_block.append(dt)
+
+        # start/end диапазон
+        start = _parse_iso_date(item.get("start"))
+        end = _parse_iso_date(item.get("end")) or start
+        if start and end:
+            for d in daterange(min(start, end), max(start, end)):
+                dates_block.append(d)
+
+        add_dates(result, emp_id, dates_block)
+
+    for emp_id, dates in result.items():
+        result[emp_id] = sorted(dates)
+
+    return result
+
+
+def _normalize_vacations_in_scenario(scn: dict) -> dict:
+    vacations = _normalize_vacations_payload(scn.get("vacations"))
+    scn["vacations"] = vacations
+
+    cfg = scn.get("config", {})
+    if cfg.get("vacations"):
+        cfg["vacations"] = _normalize_vacations_payload(cfg.get("vacations"))
+
+    months = cfg.get("months") or []
+    for ms in months:
+        if ms.get("vacations"):
+            ms["vacations"] = _normalize_vacations_payload(ms.get("vacations"))
+    return scn
+
+def load_scenarios_from_dir(dir_path: Path) -> List[dict]:
+    """
+    Загружает все .json из каталога как сценарии.
+    Игнорирует битые файлы, пишет причину в stdout.
+    """
+    out: List[dict] = []
+    for p in sorted(glob(str(dir_path / "*.json"))):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                scn = json.load(f)
+                scn = _ensure_defaults(scn)
+                scn = _normalize_vacations_in_scenario(scn)
+                out.append(scn)
+        except Exception as e:
+            print(f"[scenarios] skip {p}: {e}")
+    return out
+
+def build_config_from_scenario(base_cfg: dict, scn: dict) -> Tuple[dict, List[str]]:
+    """
+    Формирует конфиг генератора из JSON-сценария.
+    Возвращает пару (конфиг, список стажёров).
+    """
+    cfg = deep_copy_config(base_cfg)
+    scn_cfg = scn.get("config", {}) or {}
+
+    # сотрудники
+    employees_spec = scn.get("employees") or scn_cfg.get("employees") or []
+    base_emp_map = {e["id"]: dict(e) for e in cfg.get("employees", [])}
+    intern_ids: List[str] = []
+    if employees_spec:
+        new_employees: List[dict] = []
+        for rec in employees_spec:
+            eid = rec.get("id")
+            if not eid:
+                continue
+            base_emp = base_emp_map.get(eid, {
+                "id": eid,
+                "name": rec.get("name", eid),
+                "is_trainee": False,
+                "mentor_id": None,
+                "ytd_overtime": 0,
+            })
+            emp = dict(base_emp)
+            if "name" in rec:
+                emp["name"] = rec["name"]
+            if "mentor_id" in rec:
+                emp["mentor_id"] = rec["mentor_id"]
+            if "ytd_overtime" in rec:
+                emp["ytd_overtime"] = rec["ytd_overtime"]
+            if "is_trainee" in rec:
+                emp["is_trainee"] = bool(rec["is_trainee"])
+            if "intern" in rec:
+                emp["is_trainee"] = bool(rec["intern"])
+            new_employees.append(emp)
+            if emp.get("is_trainee"):
+                intern_ids.append(eid)
+        cfg["employees"] = new_employees
+    else:
+        intern_ids = [e.get("id") for e in cfg.get("employees", []) if e.get("is_trainee")]
+
+    # pair breaking overrides
+    pair_breaking_cfg = dict(cfg.get("pair_breaking", {}) or {})
+    for k, v in (scn_cfg.get("pair_breaking", {}) or {}).items():
+        pair_breaking_cfg[k] = v
+    cfg["pair_breaking"] = pair_breaking_cfg
+
+    # months
+    months_spec = scn_cfg.get("months") or []
+    if months_spec:
+        base_months = {m["month_year"]: dict(m) for m in cfg.get("months", []) if m.get("month_year")}
+        new_months: List[dict] = []
+        for ms in months_spec:
+            ym = ms.get("month_year") or ms.get("ym")
+            if not ym:
+                continue
+            month_cfg = base_months.get(ym, {
+                "month_year": ym,
+                "norm_hours_month": ms.get("norm_hours_month", 184),
+                "vacations": {},
+            })
+            month_cfg = dict(month_cfg)
+            month_cfg["month_year"] = ym
+            if "norm_hours_month" in ms:
+                month_cfg["norm_hours_month"] = ms["norm_hours_month"]
+            if "vacations" in ms:
+                month_cfg["vacations"] = ms["vacations"]
+            elif not scn_cfg.get("use_preset_vacations", True):
+                month_cfg["vacations"] = {}
+            new_months.append(month_cfg)
+        cfg["months"] = new_months
+    elif not scn_cfg.get("use_preset_vacations", True):
+        for month_cfg in cfg.get("months", []):
+            month_cfg["vacations"] = {}
+
+    # Дополнительные отпуска из JSON-структуры (legacy совместимость)
+    extra_vacations = scn.get("vacations") or scn_cfg.get("vacations") or {}
+    if extra_vacations:
+        cfg = merge_vacations(cfg, extra_vacations)
+
+    return cfg, intern_ids
 
 # ---------------------------------------------------------------------------
 # Запуск одного сценария
 # ---------------------------------------------------------------------------
 
 def run_scenario(scn: dict, out_root: Path):
-    # 0) базовый конфиг + фильтрация сотрудников + добавление отпусков
-    cfg0 = deep_copy_config(BASE_CONFIG)
-    cfg1 = filter_employees(cfg0, scn["keep_ids"])
-    cfg2 = merge_vacations(cfg1, scn.get("vacations", {}))
+    # 0) базовый конфиг + JSON-переопределения
+    cfg2, intern_ids = build_config_from_scenario(BASE_CONFIG, scn)
 
-    # переключатель балансера
-    cfg2["pair_breaking"]["enabled"] = bool(scn.get("pair_breaking_enabled", False))
+    # Совместимость со старыми сценариями: keep_ids / vacations / переключатель балансера
+    if scn.get("keep_ids"):
+        cfg2 = filter_employees(cfg2, scn["keep_ids"])
+    if scn.get("vacations") and not scn.get("config", {}).get("vacations"):
+        cfg2 = merge_vacations(cfg2, scn.get("vacations", {}))
+    if "pair_breaking_enabled" in scn:
+        cfg2.setdefault("pair_breaking", {})["enabled"] = bool(scn.get("pair_breaking_enabled", False))
+
+    if intern_ids:
+        merged_interns = set(scn.get("intern_ids", []) or [])
+        merged_interns.update(intern_ids)
+        scn["intern_ids"] = sorted(merged_interns)
 
     # 1) генератор, кодовая карта для отчётов
     gen = Generator(cfg2)
@@ -329,17 +536,29 @@ def run_scenario(scn: dict, out_root: Path):
 # ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    out_root = Path(os.getcwd()) / "reports" / "scenarios"
-    out_root.mkdir(parents=True, exist_ok=True)
+def main():
+    """
+    Новая точка входа: запускаем все сценарии из ./scenarios/*.json.
+    Никаких закодированных сценариев в модуле не остаётся.
+    """
+    base_dir = Path(__file__).parent
+    scn_dir = SCENARIOS_DIR
+    out_root = base_dir / "reports"
+    out_root.mkdir(exist_ok=True)
 
-    # Можно указать SCN=<substring> в окружении, чтобы отфильтровать сценарии
-    scn_filter = os.environ.get("SCN", "").strip().lower()
+    scenarios = load_scenarios_from_dir(scn_dir)
+    if not scenarios:
+        print(f"[scenarios] no JSON scenarios found in {scn_dir}")
+        return
 
-    scenarios = scenarios_def()
     for scn in scenarios:
-        if scn_filter and scn_filter not in scn["name"].lower():
-            continue
+        if scn.get("vacations") and not scn["config"].get("vacations"):
+            scn["config"]["vacations"] = scn["vacations"]
+
+        print(f"[scenarios] run: {scn.get('name','<unnamed>')}")
+        # Вызов вашей существующей оркестрации: базовый генератор + балансировка + отчёты
         run_scenario(scn, out_root)
 
-    print("Все сценарии выполнены.")
+
+if __name__ == "__main__":
+    main()
