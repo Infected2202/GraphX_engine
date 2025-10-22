@@ -21,7 +21,8 @@
       "post_desync_include_current": true
     },
     "months": [
-      {"ym": "2025-09"}
+      {"ym": "2025-09"},
+      {"ym": "2025-10"}
     ]
   }
 }
