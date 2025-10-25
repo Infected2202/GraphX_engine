@@ -10,14 +10,22 @@ N8 = {"N8A", "N8B"}
 N4 = {"N4A", "N4B"}
 VAC = {"VAC8", "VAC0"}
 
-_CODE_TO_KEY = {
-    "DA": "day_a",
-    "DB": "day_b",
-    "NA": "night_a",
-    "NB": "night_b",
-    "N4A": "n4_a",
-    "N4B": "n4_b",
-    "OFF": "off",
+_CODE_TO_INFO = {
+    "DA": ("day_a", 12),
+    "DB": ("day_b", 12),
+    "NA": ("night_a", 12),
+    "NB": ("night_b", 12),
+    "M8A": ("m8_a", 8),
+    "M8B": ("m8_b", 8),
+    "E8A": ("e8_a", 8),
+    "E8B": ("e8_b", 8),
+    "N4A": ("n4_a", 4),
+    "N4B": ("n4_b", 4),
+    "N8A": ("n8_a", 8),
+    "N8B": ("n8_b", 8),
+    "VAC8": ("vac_wd8", 8),
+    "VAC0": ("vac_we0", 0),
+    "OFF": ("off", 0),
 }
 
 
@@ -106,16 +114,13 @@ def _set_code(schedule, emp_id: str, day: date, code: Optional[str]) -> None:
     for assignment in schedule[day]:
         if assignment.employee_id != emp_id:
             continue
-        if code is None or code == "OFF":
-            assignment.shift_key = _CODE_TO_KEY["OFF"]
-            assignment.effective_hours = 0
-        else:
-            key = _CODE_TO_KEY.get(code)
-            if key is None:
-                return
-            assignment.shift_key = key
-            if code in {"N4A", "N4B"}:
-                assignment.effective_hours = 4
+        target_code = (code or "OFF").upper()
+        info = _CODE_TO_INFO.get(target_code)
+        if info is None:
+            return
+        key, hours = info
+        assignment.shift_key = key
+        assignment.effective_hours = hours
         assignment.source = "phase_shift"
         return
 
