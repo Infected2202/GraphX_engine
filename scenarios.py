@@ -252,15 +252,15 @@ def build_config_from_scenario(base_cfg: dict, scn: dict) -> Tuple[dict, List[st
             ym = ms.get("month_year") or ms.get("ym")
             if not ym:
                 continue
-            month_cfg = base_months.get(ym, {
-                "month_year": ym,
-                "norm_hours_month": ms.get("norm_hours_month", 184),
-                "vacations": {},
-            })
-            month_cfg = dict(month_cfg)
+            if ym in base_months:
+                month_cfg = dict(base_months[ym])
+            else:
+                month_cfg = {"month_year": ym}
             month_cfg["month_year"] = ym
             if "norm_hours_month" in ms:
                 month_cfg["norm_hours_month"] = ms["norm_hours_month"]
+            elif ym not in base_months:
+                month_cfg.pop("norm_hours_month", None)
             if "vacations" in ms:
                 existing = {eid: list(ds) for eid, ds in (month_cfg.get("vacations", {}) or {}).items()}
                 parsed = normalize_vacations_map(ms.get("vacations"))
