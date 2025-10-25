@@ -81,8 +81,8 @@ def _style_for(code: str):
         fill = FILL_VAC
         font_color = "000000"
     elif c == "OFF":
-        fill = FILL_WEEKEND
-        font_color = "000000"
+        fill = FILL_NONE
+        font_color = "E2F0D9"
     else:
         # Неизвестные коды — зелёный текст для привлечения внимания.
         font_color = "008000"
