@@ -151,7 +151,7 @@ if __name__ == "__main__":
         base = f"schedule_{ym}"
         xlsx_path = out_dir / f"{base}.xlsx"
         csv_grid_path = out_dir / f"{base}_grid.csv"
-        report.write_workbook(str(xlsx_path), ym, employees, schedule)
+        report.write_workbook(str(xlsx_path), ym, employees, schedule, calendar=calendar)
         report.write_csv_grid(str(csv_grid_path), ym, employees, schedule)
         # Метрики
         metrics_emp_path = out_dir / f"{base}_metrics_employees.csv"

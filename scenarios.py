@@ -399,7 +399,7 @@ def run_scenario(scn: dict, out_root: Path):
         base = f"{scn['name']}_{ym}"
         xlsx_path = out_dir / f"{base}.xlsx"
         csv_grid_path = out_dir / f"{base}_grid.csv"
-        report.write_workbook(str(xlsx_path), ym, employees, schedule)
+        report.write_workbook(str(xlsx_path), ym, employees, schedule, calendar=calendar)
         report.write_csv_grid(str(csv_grid_path), ym, employees, schedule)
 
         metrics_emp_path = out_dir / f"{base}_metrics_employees.csv"

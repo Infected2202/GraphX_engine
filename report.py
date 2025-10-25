@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import date
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
 import csv
 import os
 from collections import defaultdict
@@ -13,6 +13,9 @@ from openpyxl.utils import get_column_letter
 
 # Внутренняя таблица кодов — устанавливается из app через set_code_map()
 _CODE_MAP: Dict[str, str] = {}
+
+if TYPE_CHECKING:
+    from production_calendar import ProductionCalendar
 
 
 def set_code_map(code_map: Dict[str, str]):
@@ -27,6 +30,11 @@ def _code_of(shift_key: str) -> str:
 # Палитра под заданные правила
 FILL_WHITE = PatternFill("solid", fgColor="FFFFFF")
 FILL_GRAY = PatternFill("solid", fgColor="DDDDDD")
+FILL_M8 = PatternFill("solid", fgColor="CFE2F3")  # голубой
+FILL_E8 = PatternFill("solid", fgColor="D9F2D0")  # салатовый
+FILL_N8 = PatternFill("solid", fgColor="000000")
+FILL_VAC = PatternFill("solid", fgColor="FEC97F")
+FILL_WEEKEND = PatternFill("solid", fgColor="E2F0D9")
 
 B_THIN = Border(
     left=Side(style="thin", color="DDDDDD"),
@@ -43,30 +51,70 @@ LEFT = Alignment(horizontal="left", vertical="center")
 def _style_for(code: str):
     """Возвращает (Font, Fill) согласно ТЗ."""
     c = (code or "").upper()
-    if c == "DA":
-        return Font(color="000000"), FILL_WHITE
-    if c == "DB":
-        return Font(color="FF0000"), FILL_WHITE
-    if c == "NA":
-        return Font(color="000000"), FILL_GRAY
-    if c == "NB":
-        return Font(color="FF0000"), FILL_GRAY
-    # Прочее
-    return Font(color="008000"), FILL_WHITE
+    office = None
+    if c.endswith("A"):
+        office = "A"
+    elif c.endswith("B"):
+        office = "B"
+
+    # Цвет текста по офисам (A→чёрный, B→красный)
+    font_color = "000000"
+    if office == "B":
+        font_color = "FF0000"
+
+    fill = FILL_WHITE
+
+    if c in {"DA", "DB"}:
+        fill = FILL_WHITE
+    elif c in {"NA", "NB", "N4A", "N4B"}:
+        fill = FILL_GRAY
+    elif c in {"M8A", "M8B"}:
+        fill = FILL_M8
+    elif c in {"E8A", "E8B"}:
+        fill = FILL_E8
+    elif c in {"N8A", "N8B"}:
+        fill = FILL_N8
+        if office == "A":
+            font_color = "FFFFFF"
+    elif c.startswith("VAC"):
+        fill = FILL_VAC
+        font_color = "000000"
+    elif c == "OFF":
+        fill = FILL_WHITE
+        font_color = "000000"
+    else:
+        # Неизвестные коды — зелёный текст для привлечения внимания.
+        font_color = "008000"
+
+    return Font(color=font_color), fill
 
 
 # ------------------- Публичные точки -------------------
-def write_workbook(path: str, ym: str, employees: List, schedule: Dict[date, List]):
+def write_workbook(
+    path: str,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    *,
+    calendar: "ProductionCalendar" | None = None,
+):
     """Совместимая точка: сохраняет XLSX с единственным листом-сеткой."""
-    return write_excel_grid(path, ym, employees, schedule)
+    return write_excel_grid(path, ym, employees, schedule, calendar=calendar)
 
 
-def write_excel_grid(path: str, ym: str, employees: List, schedule: Dict[date, List]):
+def write_excel_grid(
+    path: str,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    *,
+    calendar: "ProductionCalendar" | None = None,
+):
     """Единственный лист Excel: сетка сотрудники×дни, ячейки оформлены по правилам."""
     wb = Workbook()
     ws = wb.active
     ws.title = ym
-    _write_grid(ws, ym, employees, schedule)
+    _write_grid(ws, ym, employees, schedule, calendar=calendar)
     wb.save(path)
     return path
 
@@ -527,15 +575,35 @@ def write_log_txt(path: str, lines: List[str]):
 
 # ------------------- ГРИД -------------------
 
-def _write_grid(ws, ym: str, employees: List, schedule: Dict[date, List]):
+def _is_weekend_or_off(dt: date, calendar: "ProductionCalendar" | None) -> bool:
+    if calendar and calendar.is_working_override(dt):
+        return False
+    if dt.weekday() >= 5:
+        return True
+    if calendar and calendar.is_off_date(dt):
+        return True
+    return False
+
+
+def _write_grid(
+    ws,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    *,
+    calendar: "ProductionCalendar" | None = None,
+):
     # Заголовок: первая строка — номера дней; A1 — «Сотрудник»
     dates = sorted(schedule.keys())
+    weekend_flags = {d: _is_weekend_or_off(d, calendar) for d in dates}
     ws.cell(row=1, column=1, value="Сотрудник")
     for j, d in enumerate(dates, start=2):
         cell = ws.cell(row=1, column=j, value=d.day)
         cell.font = HEADER_FONT
         cell.alignment = CENTER
         cell.border = B_THIN
+        if weekend_flags.get(d):
+            cell.fill = FILL_WEEKEND
 
     # Тело
     employees_sorted = sorted(employees, key=lambda e: e.id)
@@ -554,6 +622,9 @@ def _write_grid(ws, ym: str, employees: List, schedule: Dict[date, List]):
             cell.alignment = CENTER
             cell.border = B_THIN
             font, fill = _style_for(code)
+            code_upper = (code or "").upper()
+            if weekend_flags.get(d) and code_upper in {"", "OFF"}:
+                fill = FILL_WEEKEND
             cell.font = font
             cell.fill = fill
 
