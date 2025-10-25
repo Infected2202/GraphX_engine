@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import date
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
 import csv
 import os
 from collections import defaultdict
@@ -14,6 +14,9 @@ from openpyxl.utils import get_column_letter
 # Внутренняя таблица кодов — устанавливается из app через set_code_map()
 _CODE_MAP: Dict[str, str] = {}
 
+if TYPE_CHECKING:
+    from production_calendar import ProductionCalendar
+
 
 def set_code_map(code_map: Dict[str, str]):
     global _CODE_MAP
@@ -25,8 +28,14 @@ def _code_of(shift_key: str) -> str:
 
 
 # Палитра под заданные правила
+FILL_NONE = PatternFill(fill_type=None)
 FILL_WHITE = PatternFill("solid", fgColor="FFFFFF")
 FILL_GRAY = PatternFill("solid", fgColor="DDDDDD")
+FILL_M8 = PatternFill("solid", fgColor="00BFFF")  # голубой
+FILL_E8 = PatternFill("solid", fgColor="00FF00")  # салатовый
+FILL_N8 = PatternFill("solid", fgColor="000000")
+FILL_VAC = PatternFill("solid", fgColor="FEC97F")
+FILL_WEEKEND = PatternFill("solid", fgColor="E2F0D9")
 
 B_THIN = Border(
     left=Side(style="thin", color="DDDDDD"),
@@ -43,30 +52,70 @@ LEFT = Alignment(horizontal="left", vertical="center")
 def _style_for(code: str):
     """Возвращает (Font, Fill) согласно ТЗ."""
     c = (code or "").upper()
-    if c == "DA":
-        return Font(color="000000"), FILL_WHITE
-    if c == "DB":
-        return Font(color="FF0000"), FILL_WHITE
-    if c == "NA":
-        return Font(color="000000"), FILL_GRAY
-    if c == "NB":
-        return Font(color="FF0000"), FILL_GRAY
-    # Прочее
-    return Font(color="008000"), FILL_WHITE
+    office = None
+    if c.endswith("A"):
+        office = "A"
+    elif c.endswith("B"):
+        office = "B"
+
+    # Цвет текста по офисам (A→чёрный, B→красный)
+    font_color = "000000"
+    if office == "B":
+        font_color = "FF0000"
+
+    fill = FILL_NONE
+
+    if c in {"DA", "DB"}:
+        fill = FILL_NONE
+    elif c in {"NA", "NB", "N4A", "N4B"}:
+        fill = FILL_GRAY
+    elif c in {"M8A", "M8B"}:
+        fill = FILL_M8
+    elif c in {"E8A", "E8B"}:
+        fill = FILL_E8
+    elif c in {"N8A", "N8B"}:
+        fill = FILL_N8
+        if office == "A":
+            font_color = "FFFFFF"
+    elif c.startswith("VAC"):
+        fill = FILL_VAC
+        font_color = "000000"
+    elif c == "OFF":
+        fill = FILL_NONE
+        font_color = "E2F0D9"
+    else:
+        # Неизвестные коды — зелёный текст для привлечения внимания.
+        font_color = "008000"
+
+    return Font(color=font_color), fill
 
 
 # ------------------- Публичные точки -------------------
-def write_workbook(path: str, ym: str, employees: List, schedule: Dict[date, List]):
+def write_workbook(
+    path: str,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    *,
+    calendar: "ProductionCalendar" | None = None,
+):
     """Совместимая точка: сохраняет XLSX с единственным листом-сеткой."""
-    return write_excel_grid(path, ym, employees, schedule)
+    return write_excel_grid(path, ym, employees, schedule, calendar=calendar)
 
 
-def write_excel_grid(path: str, ym: str, employees: List, schedule: Dict[date, List]):
+def write_excel_grid(
+    path: str,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    *,
+    calendar: "ProductionCalendar" | None = None,
+):
     """Единственный лист Excel: сетка сотрудники×дни, ячейки оформлены по правилам."""
     wb = Workbook()
     ws = wb.active
     ws.title = ym
-    _write_grid(ws, ym, employees, schedule)
+    _write_grid(ws, ym, employees, schedule, calendar=calendar)
     wb.save(path)
     return path
 
@@ -93,23 +142,29 @@ def write_csv_grid(path: str, ym: str, employees: List, schedule: Dict[date, Lis
 
 # ------------------- Метрики -------------------
 def write_metrics_days_csv(path: str, schedule: Dict[date, List]):
-    """По датам: количества DA/DB/NA/NB (учитываем N4/N8 как ночные)."""
+    """По датам: количества DA/DB/M8/NA/NB/N8 (N4/N8 учитываем как ночные; дополнительно считаем N8 отдельно)."""
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["date", "DA", "DB", "NA", "NB"])
+        w.writerow(["date", "DA", "DB", "M8", "NA", "NB", "N8"])
         for d in sorted(schedule.keys()):
-            da = db = na = nb = 0
+            da = db = m8 = na = nb = n8 = 0
             for a in schedule[d]:
                 code = _code_of(a.shift_key).upper()
                 if code == "DA":
                     da += 1
                 elif code == "DB":
                     db += 1
+                elif code in {"M8A", "M8B"}:
+                    m8 += 1
                 elif code in {"NA", "N4A", "N8A"}:
                     na += 1
+                    if code == "N8A":
+                        n8 += 1
                 elif code in {"NB", "N4B", "N8B"}:
                     nb += 1
-            w.writerow([d.isoformat(), da, db, na, nb])
+                    if code == "N8B":
+                        n8 += 1
+            w.writerow([d.isoformat(), da, db, m8, na, nb, n8])
     return path
 
 
@@ -145,6 +200,119 @@ def write_metrics_employees_csv(path: str, employees: List, schedule: Dict[date,
             s = stats[eid]
             w.writerow([eid, emp_name[eid], s["hours"], s["D"], s["N"], s["O"]])
     return path
+
+
+def _build_norms_summary(employees: List, schedule: Dict[date, List], norm_info: Dict) -> Dict:
+    norm_hours = int(norm_info.get("norm_hours") or 0)
+    monthly_allowance = int(norm_info.get("monthly_allowance") or 0)
+    monthly_cap = int(norm_info.get("monthly_cap") or (norm_hours + monthly_allowance if norm_hours else 0))
+    yearly_cap = int(norm_info.get("yearly_cap") or 0)
+
+    hours_by_emp: Dict[str, int] = {}
+    for rows in schedule.values():
+        for assn in rows:
+            hours_by_emp[assn.employee_id] = hours_by_emp.get(assn.employee_id, 0) + int(assn.effective_hours)
+
+    rows_summary: List[Dict[str, object]] = []
+    warnings: List[str] = []
+    employees_by_id = {e.id: e for e in employees}
+
+    for eid, emp in sorted(employees_by_id.items()):
+        total_hours = hours_by_emp.get(eid, 0)
+        delta = total_hours - norm_hours if norm_hours else None
+        overtime_month = max(0, delta) if (delta is not None) else 0
+        yearly_used = emp.ytd_overtime + overtime_month
+        yearly_left = yearly_cap - yearly_used if yearly_cap else None
+        rows_summary.append(
+            {
+                "employee_id": eid,
+                "employee": emp,
+                "hours": total_hours,
+                "delta": delta,
+                "overtime_month": overtime_month,
+                "yearly_left": yearly_left,
+            }
+        )
+
+        exceeds_month = bool(norm_hours and monthly_cap and total_hours > monthly_cap)
+        exceeds_year = bool(yearly_cap and yearly_left is not None and yearly_left < 0)
+        if exceeds_month or exceeds_year:
+            over_month = total_hours - norm_hours if norm_hours else total_hours
+            if exceeds_year and not exceeds_month:
+                msg = (
+                    f"{eid} — {emp.name}: превышен годовой лимит на {abs(yearly_left)}ч"
+                    if yearly_left is not None
+                    else f"{eid} — {emp.name}: превышен годовой лимит"
+                )
+            else:
+                leftover = yearly_left if yearly_left is not None else "N/A"
+                msg = f"{eid} — {emp.name}: перелимит {over_month}ч; остаток по году {leftover}ч"
+            warnings.append(msg)
+
+    return {
+        "rows": rows_summary,
+        "warnings": warnings,
+        "norm_hours": norm_hours,
+        "monthly_allowance": monthly_allowance,
+        "monthly_cap": monthly_cap,
+        "yearly_cap": yearly_cap,
+    }
+
+
+def write_norms_report(
+    path: str,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    norm_info: Dict,
+):
+    summary = _build_norms_summary(employees, schedule, norm_info)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    norm_hours = summary["norm_hours"]
+    monthly_allowance = summary["monthly_allowance"]
+    yearly_cap = summary["yearly_cap"]
+    warnings = summary["warnings"]
+    operations = norm_info.get("operations", []) or []
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"Норма месяца {ym}: {norm_hours}ч\n")
+        f.write(f"Допустимое превышение в месяц: +{monthly_allowance}ч\n")
+        f.write(f"Допустимый перелимит в год: {yearly_cap}ч\n\n")
+
+        f.write("Фактические часы по сотрудникам:\n")
+        for row in summary["rows"]:
+            emp = row["employee"]
+            hours = row["hours"]
+            delta = row["delta"]
+            yearly_left = row["yearly_left"]
+            if delta is None:
+                f.write(f"- {emp.id} — {emp.name}: {hours}ч\n")
+            else:
+                sign = "+" if delta >= 0 else ""
+                f.write(
+                    f"- {emp.id} — {emp.name}: {hours}ч (норма {sign}{delta}ч, остаток по году: {yearly_left if yearly_left is not None else 'N/A'}ч)\n"
+                )
+
+        f.write("\nСокращения смен:\n")
+        if operations:
+            for op in sorted(operations, key=lambda x: (x["date"], x["employee_id"])):
+                dt = op["date"].isoformat() if hasattr(op.get("date"), "isoformat") else op.get("date")
+                f.write(
+                    f"- {dt} {op['employee_id']}: {op['from_code']}→{op['to_code']} ({op.get('hours_delta', 0)}ч)\n"
+                )
+        else:
+            f.write("- нет\n")
+
+        f.write("\nПредупреждения:\n")
+        if warnings:
+            for msg in warnings:
+                f.write(f"- {msg}\n")
+        else:
+            f.write("- нет\n")
+
+    return path, warnings, summary
+
 
 # ------------------- Пары -------------------
 def write_pairs_csv(path: str, pairs: List[Tuple[str,str,int,int]], employees: List):
@@ -414,15 +582,35 @@ def write_log_txt(path: str, lines: List[str]):
 
 # ------------------- ГРИД -------------------
 
-def _write_grid(ws, ym: str, employees: List, schedule: Dict[date, List]):
+def _is_weekend_or_off(dt: date, calendar: "ProductionCalendar" | None) -> bool:
+    if calendar and calendar.is_working_override(dt):
+        return False
+    if dt.weekday() >= 5:
+        return True
+    if calendar and calendar.is_off_date(dt):
+        return True
+    return False
+
+
+def _write_grid(
+    ws,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    *,
+    calendar: "ProductionCalendar" | None = None,
+):
     # Заголовок: первая строка — номера дней; A1 — «Сотрудник»
     dates = sorted(schedule.keys())
+    weekend_flags = {d: _is_weekend_or_off(d, calendar) for d in dates}
     ws.cell(row=1, column=1, value="Сотрудник")
     for j, d in enumerate(dates, start=2):
         cell = ws.cell(row=1, column=j, value=d.day)
         cell.font = HEADER_FONT
         cell.alignment = CENTER
         cell.border = B_THIN
+        if weekend_flags.get(d):
+            cell.fill = FILL_WEEKEND
 
     # Тело
     employees_sorted = sorted(employees, key=lambda e: e.id)
@@ -441,6 +629,12 @@ def _write_grid(ws, ym: str, employees: List, schedule: Dict[date, List]):
             cell.alignment = CENTER
             cell.border = B_THIN
             font, fill = _style_for(code)
+            code_upper = (code or "").upper()
+            if weekend_flags.get(d):
+                if fill is FILL_NONE:
+                    fill = FILL_WEEKEND
+                elif code_upper in {"", "OFF"}:
+                    fill = FILL_WEEKEND
             cell.font = font
             cell.fill = fill
 

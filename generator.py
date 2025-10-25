@@ -6,6 +6,9 @@ import calendar
 import hashlib
 from typing import Dict, List, Tuple, Optional, Iterable
 
+from production_calendar import ProductionCalendar
+from shortener import ShiftShortener, ShorteningConfig
+
 # Ключи типов смен (должны совпадать с config)
 DAY_A, DAY_B = "day_a", "day_b"
 NIGHT_A, NIGHT_B = "night_a", "night_b"
@@ -46,8 +49,10 @@ class Assignment:
     recolored_from_night: bool = False
 
 class Generator:
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, calendar: Optional[ProductionCalendar] = None):
         self.cfg = config
+        self.calendar = calendar
+        self._last_norms_info: Optional[Dict] = None
         self.shift_types: Dict[str, ShiftType] = {
             k: ShiftType(
                 key=k,
@@ -61,6 +66,12 @@ class Generator:
             )
             for k, v in self.cfg["shift_types"].items()
         }
+        config = ShorteningConfig(
+            day_shift_keys=(DAY_A, DAY_B),
+            morning_short_by_office={"A": M8_A, "B": M8_B},
+            evening_short_by_office={"A": E8_A, "B": E8_B},
+        )
+        self.shortener = ShiftShortener(self.calendar, self.shift_types, self.code_of, config)
 
     # ---------- Коды/классификация ----------
     def code_of(self, shift_key: str) -> str:
@@ -195,7 +206,13 @@ class Generator:
         ym = month_spec["month_year"]
         y, m = self.ym_to_year_month(ym)
         _, last = self.month_bounds(y, m)
-        norm = int(month_spec["norm_hours_month"]) if month_spec.get("norm_hours_month") else 0
+        raw_norm = month_spec.get("norm_hours_month")
+        if raw_norm is not None:
+            norm = int(raw_norm)
+        elif self.calendar:
+            norm = int(self.calendar.norm_hours(y, m) or 0)
+        else:
+            norm = 0
 
         # Сотрудники
         employees = [
@@ -319,50 +336,27 @@ class Generator:
 
                 phase_map[e.id] = (ph + 1) % 4
 
-        # Управление перелимитом часов (короткие смены, приоритет в выходные)
-        self.enforce_hours_caps(employees, schedule, norm)
-
         return employees, schedule, carry_out
 
     # ---------- Ограничение часов (M8/E8 с приоритетом выходных) ----------
-    def enforce_hours_caps(self, employees: List[Employee], schedule: Dict[date, List[Assignment]], norm_month: int):
-        monthly_cap = norm_month + int(self.cfg.get("monthly_overtime_max", 0))
+    def enforce_hours_caps(
+        self,
+        employees: List[Employee],
+        schedule: Dict[date, List[Assignment]],
+        norm_month: int,
+        ym: str,
+    ) -> None:
+        monthly_allowance = int(self.cfg.get("monthly_overtime_max", 0))
         yearly_cap = int(self.cfg.get("yearly_overtime_max", 0))
+        info = self.shortener.apply(
+            employees,
+            schedule,
+            norm_month,
+            ym,
+            monthly_allowance,
+            yearly_cap,
+        )
+        self._last_norms_info = info
 
-        def month_hours(eid: str) -> int:
-            return sum(r.effective_hours for rows in schedule.values() for r in rows if r.employee_id == eid)
-
-        def yearly_ok(e: Employee, after_hours: int) -> bool:
-            overtime = max(0, after_hours - norm_month)
-            return (e.ytd_overtime + overtime) <= yearly_cap
-
-        # Сопоставление DAY→короткая (выходные — вечер E8*, будни — утро M8*)
-        def short_key_for(dd: date, day_key: str) -> Optional[str]:
-            is_weekend = dd.weekday() >= 5
-            if day_key == DAY_A:
-                return E8_A if is_weekend else M8_A
-            if day_key == DAY_B:
-                return E8_B if is_weekend else M8_B
-            return None
-
-        for e in employees:
-            cur = month_hours(e.id)
-            if cur <= monthly_cap and yearly_ok(e, cur):
-                continue
-            # Сначала рассматриваем выходные
-            candidates: List[Tuple[date, Assignment]] = []
-            for dd in sorted(schedule.keys(), key=lambda x: (x.weekday() < 5, x)):  # выходные сначала
-                for rr in schedule[dd]:
-                    if rr.employee_id == e.id and rr.shift_key in (DAY_A, DAY_B):
-                        candidates.append((dd, rr))
-            for dd, rr in candidates:
-                skey = short_key_for(dd, rr.shift_key)
-                if not skey:
-                    continue
-                st = self.shift_types[skey]
-                rr.shift_key = skey
-                rr.effective_hours = st.hours
-                rr.source = rr.source if rr.source != "template" else "autofix"
-                cur = month_hours(e.id)
-                if cur <= monthly_cap and yearly_ok(e, cur):
-                    break
+    def last_norms_info(self) -> Optional[Dict]:
+        return self._last_norms_info
