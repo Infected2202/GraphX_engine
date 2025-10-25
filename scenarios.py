@@ -391,7 +391,12 @@ def run_scenario(scn: dict, out_root: Path):
                     )
             carry_out = new_carry_out
 
-        # валидации и диагностика
+        # -------- СЛОЙ СОКРАЩЕНИЙ (ПОСЛЕДНИМ) --------
+        raw_norm = month_spec.get("norm_hours_month")
+        norm = int(raw_norm) if raw_norm is not None else int(calendar.norm_hours(y, m) or 0)
+        gen.enforce_hours_caps(employees, schedule, norm, ym)
+
+        # валидации и диагностика (уже после сокращений)
         smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=cfg2.get("pair_breaking",{}).get("window_days",6)+2)
         trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
 

@@ -336,9 +336,6 @@ class Generator:
 
                 phase_map[e.id] = (ph + 1) % 4
 
-        # Управление перелимитом часов (короткие смены, приоритет в выходные)
-        self.enforce_hours_caps(employees, schedule, norm, ym)
-
         return employees, schedule, carry_out
 
     # ---------- Ограничение часов (M8/E8 с приоритетом выходных) ----------

@@ -100,6 +100,33 @@ if __name__ == "__main__":
         # ---- Пост-перекраска отпусков (0/8ч, не влияет на паттерн) ----
         postprocess.apply_vacations(schedule, eff_vacations, gen.shift_types)
 
+        # -------- СЛОЙ СОКРАЩЕНИЙ (ПОСЛЕДНИМ) --------
+        raw_norm = month_spec.get("norm_hours_month")
+        norm = int(raw_norm) if raw_norm is not None else int(calendar.norm_hours(y, m) or 0)
+        gen.enforce_hours_caps(employees, schedule, norm, ym)
+        norm_info = gen.last_norms_info() or {}
+
+        # ---------- Сохранение в каталог reports/ ----------
+        base = f"schedule_{ym}"
+        xlsx_path = out_dir / f"{base}.xlsx"
+        csv_grid_path = out_dir / f"{base}_grid.csv"
+        report.write_workbook(str(xlsx_path), ym, employees, schedule, calendar=calendar)
+        report.write_csv_grid(str(csv_grid_path), ym, employees, schedule)
+        # Метрики
+        metrics_emp_path = out_dir / f"{base}_metrics_employees.csv"
+        metrics_days_path = out_dir / f"{base}_metrics_days.csv"
+        report.write_metrics_employees_csv(str(metrics_emp_path), employees, schedule)
+        report.write_metrics_days_csv(str(metrics_days_path), schedule)
+
+        norms_path = out_dir / f"{base}_norms.txt"
+        _, norm_warnings, _ = report.write_norms_report(
+            str(norms_path),
+            ym,
+            employees,
+            schedule,
+            norm_info,
+        )
+
         # ---------- Аналитика и логи ----------
         log_lines = []
         if CONFIG.get("logging", {}).get("enabled", True):
@@ -146,28 +173,6 @@ if __name__ == "__main__":
                     log_lines.append("[norms.warnings]")
                     for msg in norm_warnings:
                         log_lines.append(f" - {msg}")
-
-        # ---------- Сохранение в каталог reports/ ----------
-        base = f"schedule_{ym}"
-        xlsx_path = out_dir / f"{base}.xlsx"
-        csv_grid_path = out_dir / f"{base}_grid.csv"
-        report.write_workbook(str(xlsx_path), ym, employees, schedule, calendar=calendar)
-        report.write_csv_grid(str(csv_grid_path), ym, employees, schedule)
-        # Метрики
-        metrics_emp_path = out_dir / f"{base}_metrics_employees.csv"
-        metrics_days_path = out_dir / f"{base}_metrics_days.csv"
-        report.write_metrics_employees_csv(str(metrics_emp_path), employees, schedule)
-        report.write_metrics_days_csv(str(metrics_days_path), schedule)
-
-        norm_info = gen.last_norms_info() or {}
-        norms_path = out_dir / f"{base}_norms.txt"
-        _, norm_warnings, _ = report.write_norms_report(
-            str(norms_path),
-            ym,
-            employees,
-            schedule,
-            norm_info,
-        )
 
         if schedule:
             last_day = max(schedule.keys())
