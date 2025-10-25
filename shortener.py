@@ -92,12 +92,15 @@ class ShiftShortener:
                     if assn.shift_key not in self.config.day_shift_keys:
                         break
 
-                    day_workers = [
-                        a
-                        for a in schedule[dt]
-                        if self._is_day_code(self.code_of(a.shift_key))
+                    # Требование: сокращаем только если в этот день минимум 2 дневных сотрудника.
+                    # В частности, запрещаем сокращение, если текущий сотрудник единственный «дневной» в этот день.
+                    # Считаем «дневными» DA/DB/M8/E8, но дополнительно проверяем, что есть хотя бы ещё один сотрудник,
+                    # отличный от текущего, с дневным кодом.
+                    other_day_workers = [
+                        a for a in schedule[dt]
+                        if a is not assn and self._is_day_code(self.code_of(a.shift_key))
                     ]
-                    if len(day_workers) < 2:
+                    if len(other_day_workers) < 1:
                         break
 
                     chosen = self._choose_short_shift(assn, coverage_state[dt])

@@ -142,23 +142,29 @@ def write_csv_grid(path: str, ym: str, employees: List, schedule: Dict[date, Lis
 
 # ------------------- Метрики -------------------
 def write_metrics_days_csv(path: str, schedule: Dict[date, List]):
-    """По датам: количества DA/DB/NA/NB (учитываем N4/N8 как ночные)."""
+    """По датам: количества DA/DB/M8/NA/NB/N8 (N4/N8 учитываем как ночные; дополнительно считаем N8 отдельно)."""
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["date", "DA", "DB", "NA", "NB"])
+        w.writerow(["date", "DA", "DB", "M8", "NA", "NB", "N8"])
         for d in sorted(schedule.keys()):
-            da = db = na = nb = 0
+            da = db = m8 = na = nb = n8 = 0
             for a in schedule[d]:
                 code = _code_of(a.shift_key).upper()
                 if code == "DA":
                     da += 1
                 elif code == "DB":
                     db += 1
+                elif code in {"M8A", "M8B"}:
+                    m8 += 1
                 elif code in {"NA", "N4A", "N8A"}:
                     na += 1
+                    if code == "N8A":
+                        n8 += 1
                 elif code in {"NB", "N4B", "N8B"}:
                     nb += 1
-            w.writerow([d.isoformat(), da, db, na, nb])
+                    if code == "N8B":
+                        n8 += 1
+            w.writerow([d.isoformat(), da, db, m8, na, nb, n8])
     return path
 
 
