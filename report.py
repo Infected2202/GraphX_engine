@@ -146,6 +146,119 @@ def write_metrics_employees_csv(path: str, employees: List, schedule: Dict[date,
             w.writerow([eid, emp_name[eid], s["hours"], s["D"], s["N"], s["O"]])
     return path
 
+
+def _build_norms_summary(employees: List, schedule: Dict[date, List], norm_info: Dict) -> Dict:
+    norm_hours = int(norm_info.get("norm_hours") or 0)
+    monthly_allowance = int(norm_info.get("monthly_allowance") or 0)
+    monthly_cap = int(norm_info.get("monthly_cap") or (norm_hours + monthly_allowance if norm_hours else 0))
+    yearly_cap = int(norm_info.get("yearly_cap") or 0)
+
+    hours_by_emp: Dict[str, int] = {}
+    for rows in schedule.values():
+        for assn in rows:
+            hours_by_emp[assn.employee_id] = hours_by_emp.get(assn.employee_id, 0) + int(assn.effective_hours)
+
+    rows_summary: List[Dict[str, object]] = []
+    warnings: List[str] = []
+    employees_by_id = {e.id: e for e in employees}
+
+    for eid, emp in sorted(employees_by_id.items()):
+        total_hours = hours_by_emp.get(eid, 0)
+        delta = total_hours - norm_hours if norm_hours else None
+        overtime_month = max(0, delta) if (delta is not None) else 0
+        yearly_used = emp.ytd_overtime + overtime_month
+        yearly_left = yearly_cap - yearly_used if yearly_cap else None
+        rows_summary.append(
+            {
+                "employee_id": eid,
+                "employee": emp,
+                "hours": total_hours,
+                "delta": delta,
+                "overtime_month": overtime_month,
+                "yearly_left": yearly_left,
+            }
+        )
+
+        exceeds_month = bool(norm_hours and monthly_cap and total_hours > monthly_cap)
+        exceeds_year = bool(yearly_cap and yearly_left is not None and yearly_left < 0)
+        if exceeds_month or exceeds_year:
+            over_month = total_hours - norm_hours if norm_hours else total_hours
+            if exceeds_year and not exceeds_month:
+                msg = (
+                    f"{eid} — {emp.name}: превышен годовой лимит на {abs(yearly_left)}ч"
+                    if yearly_left is not None
+                    else f"{eid} — {emp.name}: превышен годовой лимит"
+                )
+            else:
+                leftover = yearly_left if yearly_left is not None else "N/A"
+                msg = f"{eid} — {emp.name}: перелимит {over_month}ч; остаток по году {leftover}ч"
+            warnings.append(msg)
+
+    return {
+        "rows": rows_summary,
+        "warnings": warnings,
+        "norm_hours": norm_hours,
+        "monthly_allowance": monthly_allowance,
+        "monthly_cap": monthly_cap,
+        "yearly_cap": yearly_cap,
+    }
+
+
+def write_norms_report(
+    path: str,
+    ym: str,
+    employees: List,
+    schedule: Dict[date, List],
+    norm_info: Dict,
+):
+    summary = _build_norms_summary(employees, schedule, norm_info)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    norm_hours = summary["norm_hours"]
+    monthly_allowance = summary["monthly_allowance"]
+    yearly_cap = summary["yearly_cap"]
+    warnings = summary["warnings"]
+    operations = norm_info.get("operations", []) or []
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"Норма месяца {ym}: {norm_hours}ч\n")
+        f.write(f"Допустимое превышение в месяц: +{monthly_allowance}ч\n")
+        f.write(f"Допустимый перелимит в год: {yearly_cap}ч\n\n")
+
+        f.write("Фактические часы по сотрудникам:\n")
+        for row in summary["rows"]:
+            emp = row["employee"]
+            hours = row["hours"]
+            delta = row["delta"]
+            yearly_left = row["yearly_left"]
+            if delta is None:
+                f.write(f"- {emp.id} — {emp.name}: {hours}ч\n")
+            else:
+                sign = "+" if delta >= 0 else ""
+                f.write(
+                    f"- {emp.id} — {emp.name}: {hours}ч (норма {sign}{delta}ч, остаток по году: {yearly_left if yearly_left is not None else 'N/A'}ч)\n"
+                )
+
+        f.write("\nСокращения смен:\n")
+        if operations:
+            for op in sorted(operations, key=lambda x: (x["date"], x["employee_id"])):
+                dt = op["date"].isoformat() if hasattr(op.get("date"), "isoformat") else op.get("date")
+                f.write(
+                    f"- {dt} {op['employee_id']}: {op['from_code']}→{op['to_code']} ({op.get('hours_delta', 0)}ч)\n"
+                )
+        else:
+            f.write("- нет\n")
+
+        f.write("\nПредупреждения:\n")
+        if warnings:
+            for msg in warnings:
+                f.write(f"- {msg}\n")
+        else:
+            f.write("- нет\n")
+
+    return path, warnings, summary
+
+
 # ------------------- Пары -------------------
 def write_pairs_csv(path: str, pairs: List[Tuple[str,str,int,int]], employees: List):
     """pairs: [(eid1,eid2,overlap_day,overlap_night), ...]"""

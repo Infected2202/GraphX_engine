@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List
 from config import CONFIG
 from generator import Generator, Assignment
+from production_calendar import ProductionCalendar
 import report
 import pairing
 import balancer
@@ -12,7 +13,8 @@ import coverage as cov
 import os
 
 if __name__ == "__main__":
-    gen = Generator(CONFIG)
+    calendar = ProductionCalendar.load_default()
+    gen = Generator(CONFIG, calendar=calendar)
 
     # Карта кодов для отчётов
     code_map = {k: v.code for k, v in gen.shift_types.items()}
@@ -130,6 +132,20 @@ if __name__ == "__main__":
             if trace:
                 log_lines.append("[diagnostics.phase_trace.first10]")
                 log_lines.extend([f" {ln}" for ln in trace])
+            if norm_info:
+                log_lines.append(f"[norms.report] file={norms_path.name}")
+                operations = norm_info.get("operations", []) or []
+                if operations:
+                    log_lines.append("[norms.shortening]")
+                    for op in sorted(operations, key=lambda x: (x["date"], x["employee_id"])):
+                        dt = op["date"].isoformat() if hasattr(op.get("date"), "isoformat") else op.get("date")
+                        log_lines.append(
+                            f" {dt} {op['employee_id']}: {op['from_code']}→{op['to_code']} ({op.get('hours_delta', 0)}ч)"
+                        )
+                if norm_warnings:
+                    log_lines.append("[norms.warnings]")
+                    for msg in norm_warnings:
+                        log_lines.append(f" - {msg}")
 
         # ---------- Сохранение в каталог reports/ ----------
         base = f"schedule_{ym}"
@@ -142,6 +158,16 @@ if __name__ == "__main__":
         metrics_days_path = out_dir / f"{base}_metrics_days.csv"
         report.write_metrics_employees_csv(str(metrics_emp_path), employees, schedule)
         report.write_metrics_days_csv(str(metrics_days_path), schedule)
+
+        norm_info = gen.last_norms_info() or {}
+        norms_path = out_dir / f"{base}_norms.txt"
+        _, norm_warnings, _ = report.write_norms_report(
+            str(norms_path),
+            ym,
+            employees,
+            schedule,
+            norm_info,
+        )
 
         if schedule:
             last_day = max(schedule.keys())
