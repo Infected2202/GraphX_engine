@@ -28,10 +28,11 @@ def _code_of(shift_key: str) -> str:
 
 
 # Палитра под заданные правила
+FILL_NONE = PatternFill(fill_type=None)
 FILL_WHITE = PatternFill("solid", fgColor="FFFFFF")
 FILL_GRAY = PatternFill("solid", fgColor="DDDDDD")
-FILL_M8 = PatternFill("solid", fgColor="CFE2F3")  # голубой
-FILL_E8 = PatternFill("solid", fgColor="D9F2D0")  # салатовый
+FILL_M8 = PatternFill("solid", fgColor="00BFFF")  # голубой
+FILL_E8 = PatternFill("solid", fgColor="00FF00")  # салатовый
 FILL_N8 = PatternFill("solid", fgColor="000000")
 FILL_VAC = PatternFill("solid", fgColor="FEC97F")
 FILL_WEEKEND = PatternFill("solid", fgColor="E2F0D9")
@@ -62,10 +63,10 @@ def _style_for(code: str):
     if office == "B":
         font_color = "FF0000"
 
-    fill = FILL_WHITE
+    fill = FILL_NONE
 
     if c in {"DA", "DB"}:
-        fill = FILL_WHITE
+        fill = FILL_NONE
     elif c in {"NA", "NB", "N4A", "N4B"}:
         fill = FILL_GRAY
     elif c in {"M8A", "M8B"}:
@@ -80,7 +81,7 @@ def _style_for(code: str):
         fill = FILL_VAC
         font_color = "000000"
     elif c == "OFF":
-        fill = FILL_WHITE
+        fill = FILL_WEEKEND
         font_color = "000000"
     else:
         # Неизвестные коды — зелёный текст для привлечения внимания.
@@ -623,8 +624,11 @@ def _write_grid(
             cell.border = B_THIN
             font, fill = _style_for(code)
             code_upper = (code or "").upper()
-            if weekend_flags.get(d) and code_upper in {"", "OFF"}:
-                fill = FILL_WEEKEND
+            if weekend_flags.get(d):
+                if fill is FILL_NONE:
+                    fill = FILL_WEEKEND
+                elif code_upper in {"", "OFF"}:
+                    fill = FILL_WEEKEND
             cell.font = font
             cell.fill = fill
 
