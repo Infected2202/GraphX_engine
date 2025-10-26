@@ -58,6 +58,10 @@ def apply_pair_breaking(
     config: Dict[str, object] | None = None,
 ) -> BalanceResult:
     config = config or {}
+    if not bool(config.get("enabled", True)):
+        pairs = analyse_pairs(schedule, code_lookup)
+        return BalanceResult(schedule.copy(), [], pairs, pairs)
+
     threshold = int(config.get("night_overlap_threshold", 3))
 
     pairs_before = analyse_pairs(schedule, code_lookup)
