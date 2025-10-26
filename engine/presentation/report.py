@@ -5,7 +5,7 @@ import csv
 import os
 from collections import defaultdict
 
-import pairing
+from engine.services import pairing
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 _CODE_MAP: Dict[str, str] = {}
 
 if TYPE_CHECKING:
-    from production_calendar import ProductionCalendar
+    from engine.infrastructure.production_calendar import ProductionCalendar
 
 
 def set_code_map(code_map: Dict[str, str]):

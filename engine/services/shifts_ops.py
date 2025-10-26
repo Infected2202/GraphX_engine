@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import List, Tuple, Optional
 from datetime import date
 import copy
-import rotor
+
+from engine.services import rotor
 
 # --- Code groups ---
 N8 = {"N8A", "N8B"}

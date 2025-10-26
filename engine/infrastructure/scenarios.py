@@ -6,15 +6,16 @@ from typing import Dict, List, Tuple, Optional
 from glob import glob
 import json
 
-from config import CONFIG as BASE_CONFIG
-from generator import Generator, Assignment
-from production_calendar import ProductionCalendar
-import report
-import pairing
-import balancer
-import postprocess
-import validator
-import coverage as cov
+from engine.domain.schedule import Assignment
+from engine.infrastructure.config import CONFIG as BASE_CONFIG
+from engine.infrastructure.production_calendar import ProductionCalendar
+from engine.presentation import report
+from engine.services.generator import Generator
+from engine.services import pairing
+from engine.services import balancer
+from engine.services import postprocess
+from engine.services import validator
+from engine.services import coverage as cov
 
 # ---------------------------------------------------------------------------
 # Вспомогательные утилиты
@@ -157,7 +158,7 @@ def extract_tail(schedule, employees, gen: Generator) -> Dict[str, List[str]]:
 # Сценарии
 # ---------------------------------------------------------------------------
 
-SCENARIOS_DIR = Path(__file__).parent / "scenarios"
+SCENARIOS_DIR = Path(__file__).parent / "scenario_presets"
 
 def _ensure_defaults(scn: dict) -> dict:
     """
