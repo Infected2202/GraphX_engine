@@ -3,8 +3,12 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+import sys
 from glob import glob
 import json
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from engine.domain.schedule import Assignment
 from engine.infrastructure.config import CONFIG as BASE_CONFIG
