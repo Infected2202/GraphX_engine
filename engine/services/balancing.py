@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List, Tuple
-from datetime import date
+
 import copy
-import shifts_ops
-import pairing
-import coverage as cov
+from datetime import date
+from typing import Dict, List, Tuple
+
+from engine.services import analytics
+from engine.services import shifts_ops
 
 DAYC = {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}
 
@@ -120,7 +121,7 @@ def _delta_hours_pred_plus_one(schedule, code_of, emp_id: str) -> int:
 def _solo_in_window(schedule, code_of, ordered_dates: List[date], window_days: int, eid: str) -> int:
     limit = min(len(ordered_dates), max(1, window_days))
     window_sched = {d: schedule[d] for d in ordered_dates[:limit]}
-    return cov.solo_days_by_employee(window_sched, code_of).get(eid, 0)
+    return analytics.solo_days_by_employee(window_sched, code_of).get(eid, 0)
 
 
 def _same_office_overlap_hours(
@@ -183,7 +184,7 @@ def apply_pair_breaking(
     }
     intern_ids = intern_ids_cfg | intern_ids_emp
 
-    entry_pairs = pairing.pair_hours_exclusive(
+    entry_pairs = analytics.pair_hours_exclusive(
         schedule,
         code_of,
         prev_pairs,
@@ -193,7 +194,7 @@ def apply_pair_breaking(
     entry_score = sum(item[4] for item in entry_pairs)
 
     if not cfg.get("enabled", False):
-        solo_after = cov.solo_days_by_employee(schedule, code_of)
+        solo_after = analytics.solo_days_by_employee(schedule, code_of)
         return schedule, ops_log, solo_after, entry_score, entry_score, apply_log
 
     window_days = int(cfg.get("window_days", 6))
@@ -205,7 +206,7 @@ def apply_pair_breaking(
     cur_sched = copy.deepcopy(schedule)
     ordered_dates = sorted(cur_sched.keys())
 
-    base_pairs_hours = pairing.pair_hours_exclusive(
+    base_pairs_hours = analytics.pair_hours_exclusive(
         cur_sched,
         code_of,
         prev_pairs,
@@ -214,7 +215,7 @@ def apply_pair_breaking(
     )
     base_score = sum(item[4] for item in base_pairs_hours)
 
-    prev_exclusive = pairing.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
+    prev_exclusive = analytics.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
     prev_exclusive = [
         (a, b, d, n)
         for (a, b, d, n) in prev_exclusive
@@ -272,7 +273,7 @@ def apply_pair_breaking(
         w1 = ordered_dates[limit]
         window = (w0, w1)
 
-        before_pairs = pairing.pair_hours_exclusive(
+        before_pairs = analytics.pair_hours_exclusive(
             cur_sched,
             code_of,
             prev_pairs,
@@ -313,7 +314,7 @@ def apply_pair_breaking(
             )
 
         if ok1 and test_sched is not None:
-            after_pairs = pairing.pair_hours_exclusive(
+            after_pairs = analytics.pair_hours_exclusive(
                 test_sched,
                 code_of,
                 prev_pairs,
@@ -390,7 +391,7 @@ def apply_pair_breaking(
             )
 
         if ok2 and test_sched2 is not None:
-            after_pairs = pairing.pair_hours_exclusive(
+            after_pairs = analytics.pair_hours_exclusive(
                 test_sched2,
                 code_of,
                 prev_pairs,
@@ -454,7 +455,7 @@ def apply_pair_breaking(
             anti_align=anti_align,
         )
         if ok_flip_d:
-            after_pairs = pairing.pair_hours_exclusive(
+            after_pairs = analytics.pair_hours_exclusive(
                 flip_sched_d,
                 code_of,
                 prev_pairs,
@@ -510,7 +511,7 @@ def apply_pair_breaking(
             anti_align=anti_align,
         )
         if ok_flip_n:
-            after_pairs = pairing.pair_hours_exclusive(
+            after_pairs = analytics.pair_hours_exclusive(
                 flip_sched_n,
                 code_of,
                 prev_pairs,
@@ -558,7 +559,7 @@ def apply_pair_breaking(
         if not ok_flip_n and note_flip_n:
             apply_log.append(f"{plus_emp}: op=flipN {note_flip_n}")
 
-    solo_after = cov.solo_days_by_employee(cur_sched, code_of)
+    solo_after = analytics.solo_days_by_employee(cur_sched, code_of)
 
     post_notes: List[str] = []
     total_flips = 0
@@ -628,7 +629,7 @@ def apply_pair_breaking(
             for msg in extra_notes:
                 ops_log.append("  " + msg)
 
-    after_pairs = pairing.pair_hours_exclusive(
+    after_pairs = analytics.pair_hours_exclusive(
         cur_sched,
         code_of,
         prev_pairs,

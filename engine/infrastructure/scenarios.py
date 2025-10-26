@@ -6,15 +6,15 @@ from typing import Dict, List, Tuple, Optional
 from glob import glob
 import json
 
-from config import CONFIG as BASE_CONFIG
-from generator import Generator, Assignment
-from production_calendar import ProductionCalendar
-import report
-import pairing
-import balancer
-import postprocess
-import validator
-import coverage as cov
+from engine.domain.schedule import Assignment
+from engine.infrastructure.config import CONFIG as BASE_CONFIG
+from engine.infrastructure.production_calendar import ProductionCalendar
+from engine.presentation import report
+from engine.services import analytics
+from engine.services import balancing
+from engine.services import postprocess
+from engine.services import validation
+from engine.services.generator import Generator
 
 # ---------------------------------------------------------------------------
 # Вспомогательные утилиты
@@ -344,16 +344,16 @@ def run_scenario(scn: dict, out_root: Path):
         )
 
         # baseline-validator до балансировки
-        baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
+        baseline_issues = validation.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
 
         # балансировка пар (safe-mode в начале месяца)
-        pairs_before = pairing.compute_pairs(schedule, gen.code_of)
+        pairs_before = analytics.compute_pairs(schedule, gen.code_of)
         pb_cfg = dict(cfg2.get("pair_breaking", {}) or {})
         prev_pairs_hint = scn.get("prev_pairs_for_month") or scn.get("prev_pairs") or prev_pairs_for_month or []
         pb_cfg.setdefault("prev_pairs", prev_pairs_hint)
         if "intern_ids" in scn:
             pb_cfg["intern_ids"] = scn["intern_ids"]
-        schedule_balanced, ops_log, _solo_after, pair_score_before, pair_score_after, apply_log = balancer.apply_pair_breaking(
+        schedule_balanced, ops_log, _solo_after, pair_score_before, pair_score_after, apply_log = balancing.apply_pair_breaking(
             schedule,
             employees,
             gen.code_of,
@@ -397,8 +397,8 @@ def run_scenario(scn: dict, out_root: Path):
         gen.enforce_hours_caps(employees, schedule, norm, ym)
 
         # валидации и диагностика (уже после сокращений)
-        smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=cfg2.get("pair_breaking",{}).get("window_days",6)+2)
-        trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
+        smoke = validation.coverage_smoke(ym, schedule, gen.code_of, first_days=cfg2.get("pair_breaking",{}).get("window_days",6)+2)
+        trace = validation.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
 
         # отчёты
         base = f"{scn['name']}_{ym}"
@@ -422,7 +422,7 @@ def run_scenario(scn: dict, out_root: Path):
             norm_info,
         )
 
-        pairs_after = pairing.compute_pairs(schedule, gen.code_of)
+        pairs_after = analytics.compute_pairs(schedule, gen.code_of)
         pairs_path = out_dir / f"{base}_pairs.csv"
         report.write_pairs_csv(str(pairs_path), pairs_after, employees)
 
@@ -455,7 +455,7 @@ def run_scenario(scn: dict, out_root: Path):
             log_lines.append("[vacations.effective]")
             log_lines.extend(vlines)
         if baseline_issues:
-            log_lines.append("[validator.baseline.issues]")
+            log_lines.append("[validation.baseline.issues]")
             log_lines.extend([f" - {x}" for x in baseline_issues])
         if trace:
             log_lines.append("[diagnostics.phase_trace.first10]")
@@ -513,7 +513,7 @@ def run_scenario(scn: dict, out_root: Path):
         carry_in = carry_out
 
         # анти-соло счётчик: если в месяце были соло-дни — инкремент сотруднику
-        solo_days = cov.solo_days_by_employee(schedule, gen.code_of)
+        solo_days = analytics.solo_days_by_employee(schedule, gen.code_of)
         solo_emp_ids = {eid for eid, cnt in solo_days.items() if cnt > 0}
         for e in employees:
             if e.id in solo_emp_ids:

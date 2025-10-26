@@ -1,52 +1,34 @@
-# -*- coding: utf-8 -*-
+"""Core schedule generator service."""
+
 from __future__ import annotations
-from dataclasses import dataclass
+
 from datetime import date, timedelta
 import calendar
 import hashlib
-from typing import Dict, List, Tuple, Optional, Iterable
+from typing import Dict, Iterable, List, Optional, Tuple
 
-from production_calendar import ProductionCalendar
-from shortener import ShiftShortener, ShorteningConfig
-
-# Ключи типов смен (должны совпадать с config)
-DAY_A, DAY_B = "day_a", "day_b"
-NIGHT_A, NIGHT_B = "night_a", "night_b"
-M8_A, M8_B = "m8_a", "m8_b"
-E8_A, E8_B = "e8_a", "e8_b"
-N4_A, N4_B = "n4_a", "n4_b"
-N8_A, N8_B = "n8_a", "n8_b"
-VAC_WD8, VAC_WE0 = "vac_wd8", "vac_we0"
-OFF = "off"
-
-@dataclass
-class ShiftType:
-    key: str
-    code: str
-    office: Optional[str]
-    start: Optional[str]
-    end: Optional[str]
-    hours: int
-    is_working: bool
-    label: str
-
-@dataclass
-class Employee:
-    id: str
-    name: str
-    is_trainee: bool = False
-    mentor_id: Optional[str] = None
-    ytd_overtime: int = 0
-    seed4: int = 0           # фаза 0..3 (Д, Н, В, В)
-
-@dataclass
-class Assignment:
-    employee_id: str
-    date: date
-    shift_key: str
-    effective_hours: int
-    source: str  # 'template' | 'autofix' | 'override'
-    recolored_from_night: bool = False
+from engine.domain.employee import Employee
+from engine.domain.schedule import Assignment
+from engine.domain.shift import (
+    DAY_A,
+    DAY_B,
+    E8_A,
+    E8_B,
+    M8_A,
+    M8_B,
+    N4_A,
+    N4_B,
+    N8_A,
+    N8_B,
+    NIGHT_A,
+    NIGHT_B,
+    OFF,
+    ShiftType,
+    VAC_WD8,
+    VAC_WE0,
+)
+from engine.infrastructure.production_calendar import ProductionCalendar
+from engine.services.shortener import ShiftShortener, ShorteningConfig
 
 class Generator:
     def __init__(self, config: Dict, calendar: Optional[ProductionCalendar] = None):

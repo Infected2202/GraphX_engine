@@ -1,16 +1,17 @@
 from datetime import date
 from pathlib import Path
 from typing import List
-from config import CONFIG
-from generator import Generator, Assignment
-from production_calendar import ProductionCalendar
-import report
-import pairing
-import balancer
-import postprocess
-import validator
-import coverage as cov
 import os
+
+from engine.domain.schedule import Assignment
+from engine.infrastructure.config import CONFIG
+from engine.infrastructure.production_calendar import ProductionCalendar
+from engine.presentation import report
+from engine.services import analytics
+from engine.services import balancing
+from engine.services import postprocess
+from engine.services import validation
+from engine.services.generator import Generator
 
 if __name__ == "__main__":
     calendar = ProductionCalendar.load_default()
@@ -85,10 +86,10 @@ if __name__ == "__main__":
         )
 
         # ---- Балансировка пар (safe-mode в начале месяца) ----
-        pairs_before = pairing.compute_pairs(schedule, gen.code_of)
+        pairs_before = analytics.compute_pairs(schedule, gen.code_of)
         pb_cfg = dict(CONFIG.get("pair_breaking", {}) or {})
         pb_cfg.setdefault("prev_pairs", prev_pairs_for_report or [])
-        schedule_balanced, ops_log, solo_after, pair_score_before_pb, pair_score_after_pb, apply_log = balancer.apply_pair_breaking(
+        schedule_balanced, ops_log, solo_after, pair_score_before_pb, pair_score_after_pb, apply_log = balancing.apply_pair_breaking(
             schedule,
             employees,
             gen.code_of,
@@ -145,17 +146,17 @@ if __name__ == "__main__":
                     log_lines.append("[pair_breaking.ops]")
                     log_lines.extend([f" - {x}" for x in ops_log])
                 # smoke по первым дням
-                smoke = validator.coverage_smoke(ym, schedule, gen.code_of, first_days=CONFIG.get("pair_breaking", {}).get("window_days", 6) + 2)
+                smoke = validation.coverage_smoke(ym, schedule, gen.code_of, first_days=CONFIG.get("pair_breaking", {}).get("window_days", 6) + 2)
                 log_lines.append("[coverage.smoke.first-days]")
                 for row in smoke:
                     log_lines.append(f" {row[0]}: DA={row[1]} DB={row[2]} NA={row[3]} NB={row[4]}")
             # baseline валидация с учётом N4/N8 и игнором VAC
-            baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
+            baseline_issues = validation.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
             if baseline_issues:
-                log_lines.append("[validator.baseline.issues]")
+                log_lines.append("[validation.baseline.issues]")
                 log_lines.extend([f" - {x}" for x in baseline_issues])
             # диагностический трейс фазы (первые 10 дней)
-            trace = validator.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
+            trace = validation.phase_trace(ym, employees, schedule, gen.code_of, gen=None, days=10)
             if trace:
                 log_lines.append("[diagnostics.phase_trace.first10]")
                 log_lines.extend([f" {ln}" for ln in trace])
@@ -196,7 +197,7 @@ if __name__ == "__main__":
             carry_out = new_carry_out
 
         # Пары (после возможного баланса)
-        pairs = pairing.compute_pairs(schedule, gen.code_of)
+        pairs = analytics.compute_pairs(schedule, gen.code_of)
         pair_score_after = sum(p[2] for p in pairs)
         pairs_path = out_dir / f"{base}_pairs.csv"
         report.write_pairs_csv(str(pairs_path), pairs, employees)
@@ -264,7 +265,7 @@ if __name__ == "__main__":
 
         # ---- Анти-соло счётчик (по месяцу) ----
         # считаем «соло-дни» в этом месяце и накапливаем «соло-месяцы»
-        solo_days = cov.solo_days_by_employee(schedule, gen.code_of)
+        solo_days = analytics.solo_days_by_employee(schedule, gen.code_of)
         solo_emp_ids = {eid for eid, cnt in solo_days.items() if cnt > 0}
         for e in employees:
             if e.id in solo_emp_ids:

@@ -1,21 +1,22 @@
 from __future__ import annotations
-from datetime import date
-from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
+
 import csv
 import os
 from collections import defaultdict
-
-import pairing
+from datetime import date
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+from engine.services import analytics
 
 # Внутренняя таблица кодов — устанавливается из app через set_code_map()
 _CODE_MAP: Dict[str, str] = {}
 
 if TYPE_CHECKING:
-    from production_calendar import ProductionCalendar
+    from engine.infrastructure.production_calendar import ProductionCalendar
 
 
 def set_code_map(code_map: Dict[str, str]):
@@ -355,8 +356,8 @@ def write_pairs_text_report(
             rows.append(f" {e1}~{e2} d{d}/n{n}")
         return rows
 
-    prev_excl = pairing.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
-    curr_excl = pairing.exclusive_matching_by_day(curr_pairs, threshold_day=threshold_day)
+    prev_excl = analytics.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
+    curr_excl = analytics.exclusive_matching_by_day(curr_pairs, threshold_day=threshold_day)
 
     def key_of(a: str, b: str) -> str:
         return f"{a}~{b}" if a < b else f"{b}~{a}"
@@ -476,8 +477,8 @@ def render_pairs_text_block(
     def fmt_pairs(lst: List[Tuple[str, str, int, int]], top: int = 10) -> List[str]:
         return [f" {a}~{b} d{d}/n{n}" for a, b, d, n in lst[:top]]
 
-    prev_excl = pairing.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
-    curr_excl = pairing.exclusive_matching_by_day(curr_pairs, threshold_day=threshold_day)
+    prev_excl = analytics.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
+    curr_excl = analytics.exclusive_matching_by_day(curr_pairs, threshold_day=threshold_day)
 
     def key_of(a: str, b: str) -> str:
         return f"{a}~{b}" if a < b else f"{b}~{a}"
