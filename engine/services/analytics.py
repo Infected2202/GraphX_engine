@@ -1,75 +1,113 @@
-# -*- coding: utf-8 -*-
+"""Aggregated analytical utilities: coverage counters and pairing metrics."""
 from __future__ import annotations
-from typing import Dict, List, Tuple, Set
-from datetime import date
 
-# schedule: Dict[date, List[Assignment]]
-# Assignment: employee_id, shift_key
-# compute_pairs(schedule, code_of) — уже существует и возвращает [(e1,e2,day_ov,night_ov), ...]
+from datetime import date
+from typing import Dict, List, Sequence, Set, Tuple
+
+# ---------------------- Coverage helpers ----------------------
+
+N8 = {"N8A", "N8B"}
+DAYC = {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}
+NIGHT = {"NA", "NB", "N4A", "N4B"}  # N8 на 1-е считаем OFF
+
+
+def _code_upper(code_of_fn, shift_key: str) -> str:
+    return code_of_fn(shift_key).upper()
+
+
+def _is_carry_in_n8(d: date, code: str) -> bool:
+    return d.day == 1 and (code or "").upper() in N8
+
+
+def per_day_counts(schedule, code_of_fn):
+    """Возвращает по каждой дате счётчики DA/DB/NA/NB."""
+
+    out = {}
+    for d, rows in schedule.items():
+        c = {"DA": 0, "DB": 0, "NA": 0, "NB": 0}
+        for a in rows:
+            c0 = _code_upper(code_of_fn, a.shift_key)
+            if c0 in DAYC:
+                if c0.endswith("A"):
+                    c["DA"] += 1
+                elif c0.endswith("B"):
+                    c["DB"] += 1
+                continue
+            if c0 in NIGHT:
+                if c0.endswith("A"):
+                    c["NA"] += 1
+                else:
+                    c["NB"] += 1
+                continue
+            if c0 in N8 and not _is_carry_in_n8(d, c0):
+                if c0.endswith("A"):
+                    c["NA"] += 1
+                else:
+                    c["NB"] += 1
+        out[d] = c
+    return out
+
+
+def solo_days_by_employee(schedule, code_of_fn):
+    """Количество «соло-дней» по сотрудникам."""
+
+    out: Dict[str, int] = {}
+    for d, rows in schedule.items():
+        day_workers: List[str] = []
+        for a in rows:
+            c0 = _code_upper(code_of_fn, a.shift_key)
+            if c0 in DAYC:
+                day_workers.append(a.employee_id)
+        if len(day_workers) == 1:
+            eid = day_workers[0]
+            out[eid] = out.get(eid, 0) + 1
+    return out
+
+
+# ---------------------- Pairing metrics ----------------------
 
 
 def _tok(code: str) -> str:
     c = (code or "").upper()
-    if c in {"DA","DB","M8A","M8B","E8A","E8B"}: return "D"
-    if c in {"NA","NB","N4A","N4B","N8A","N8B"}: return "N"
+    if c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
+        return "D"
+    if c in {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}:
+        return "N"
     return "O"
 
 
-def compute_pairs(schedule: Dict[date, List], code_of) -> List[Tuple[str,str,int,int]]:
+def compute_pairs(schedule: Dict[date, List], code_of) -> List[Tuple[str, str, int, int]]:
     """Возвращает список (emp1, emp2, overlap_day, overlap_night)."""
-    # Соберём список сотрудников
-    emp_ids = set()
+
+    emp_ids: Set[str] = set()
     for rows in schedule.values():
         for a in rows:
             emp_ids.add(a.employee_id)
-    emp_ids = sorted(emp_ids)
-    idx = {e:i for i,e in enumerate(emp_ids)}
-    n = len(emp_ids)
-    od = [[0]*n for _ in range(n)]
-    on = [[0]*n for _ in range(n)]
+    ordered = sorted(emp_ids)
+    idx = {e: i for i, e in enumerate(ordered)}
+    n = len(ordered)
+    od = [[0] * n for _ in range(n)]
+    on = [[0] * n for _ in range(n)]
 
     for d, rows in schedule.items():
         toks = ["O"] * n
         for a in rows:
             code = code_of(a.shift_key)
             toks[idx[a.employee_id]] = _tok(code)
-        # инкремент по парам
         for i in range(n):
-            for j in range(i+1, n):
+            for j in range(i + 1, n):
                 if toks[i] == "D" and toks[j] == "D":
                     od[i][j] += 1
                 elif toks[i] == "N" and toks[j] == "N":
                     on[i][j] += 1
-    out: List[Tuple[str,str,int,int]] = []
+
+    out: List[Tuple[str, str, int, int]] = []
     for i in range(n):
-        for j in range(i+1, n):
-            out.append((emp_ids[i], emp_ids[j], od[i][j], on[i][j]))
-    # сортируем по overlap_day убыв., затем по overlap_night
+        for j in range(i + 1, n):
+            out.append((ordered[i], ordered[j], od[i][j], on[i][j]))
     out.sort(key=lambda t: (t[2], t[3]), reverse=True)
     return out
 
-
-def exclusive_matching_by_day(
-    pairs: List[Tuple[str, str, int, int]],
-    threshold_day: int = 0,
-) -> List[Tuple[str, str, int, int]]:
-    """
-    Жадный эксклюзивный matching: выбираем непересекающиеся пары по дневным пересечениям.
-    """
-
-    cand = [p for p in pairs if p[2] >= threshold_day]
-    cand.sort(key=lambda x: (x[2], x[3]), reverse=True)
-    used: Set[str] = set()
-    res: List[Tuple[str, str, int, int]] = []
-    for e1, e2, d, n in cand:
-        if e1 in used or e2 in used:
-            continue
-        used.add(e1)
-        used.add(e2)
-        res.append((e1, e2, d, n))
-    return res
-
-# -------------------- Новое: часовая метрика пар --------------------
 
 DAY12 = {"DA", "DB"}
 DAY8 = {"M8A", "M8B", "E8A", "E8B"}
@@ -80,8 +118,6 @@ VAC = {"VAC8", "VAC0"}
 
 
 def _tok_for_pair(code: str, d: date) -> str:
-    """Вернуть токен пары (D/N/O), учитывая, что N8 на 1-е считаем OFF."""
-
     c = (code or "OFF").upper()
     if d.day == 1 and c in NIGHT8:
         return "O"
@@ -103,6 +139,25 @@ def _hours_of(code: str) -> int:
     if c == "VAC8":
         return 8
     return 0
+
+
+def exclusive_matching_by_day(
+    pairs: Sequence[Tuple[str, str, int, int]],
+    threshold_day: int = 0,
+) -> List[Tuple[str, str, int, int]]:
+    """Жадный эксклюзивный matching по дневным пересечениям."""
+
+    cand = [p for p in pairs if p[2] >= threshold_day]
+    cand.sort(key=lambda x: (x[2], x[3]), reverse=True)
+    used: Set[str] = set()
+    res: List[Tuple[str, str, int, int]] = []
+    for e1, e2, d, n in cand:
+        if e1 in used or e2 in used:
+            continue
+        used.add(e1)
+        used.add(e2)
+        res.append((e1, e2, d, n))
+    return res
 
 
 def pair_hours_for_pair(schedule, code_of, a: str, b: str) -> Tuple[int, int, int]:
@@ -133,7 +188,7 @@ def pair_hours_for_pair(schedule, code_of, a: str, b: str) -> Tuple[int, int, in
 def pair_hours_exclusive(
     schedule,
     code_of,
-    prev_pairs: List[Tuple[str, str, int, int]] | None,
+    prev_pairs: Sequence[Tuple[str, str, int, int]] | None,
     threshold_day: int = 0,
     skip_ids: Set[str] | None = None,
 ) -> List[Tuple[str, str, int, int, int]]:

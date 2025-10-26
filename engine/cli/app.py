@@ -1,16 +1,17 @@
 from datetime import date
 from pathlib import Path
 from typing import List
-from config import CONFIG
-from generator import Generator, Assignment
-from production_calendar import ProductionCalendar
-import report
-import pairing
-import balancer
-import postprocess
-import validator
-import coverage as cov
 import os
+
+from engine.domain.schedule import Assignment
+from engine.infrastructure.config import CONFIG
+from engine.infrastructure.production_calendar import ProductionCalendar
+from engine.presentation import report
+from engine.services import analytics
+from engine.services import balancing as balancer
+from engine.services import postprocess
+from engine.services import validation as validator
+from engine.services.generator import Generator
 
 if __name__ == "__main__":
     calendar = ProductionCalendar.load_default()
@@ -85,7 +86,7 @@ if __name__ == "__main__":
         )
 
         # ---- Балансировка пар (safe-mode в начале месяца) ----
-        pairs_before = pairing.compute_pairs(schedule, gen.code_of)
+        pairs_before = analytics.compute_pairs(schedule, gen.code_of)
         pb_cfg = dict(CONFIG.get("pair_breaking", {}) or {})
         pb_cfg.setdefault("prev_pairs", prev_pairs_for_report or [])
         schedule_balanced, ops_log, solo_after, pair_score_before_pb, pair_score_after_pb, apply_log = balancer.apply_pair_breaking(
@@ -196,7 +197,7 @@ if __name__ == "__main__":
             carry_out = new_carry_out
 
         # Пары (после возможного баланса)
-        pairs = pairing.compute_pairs(schedule, gen.code_of)
+        pairs = analytics.compute_pairs(schedule, gen.code_of)
         pair_score_after = sum(p[2] for p in pairs)
         pairs_path = out_dir / f"{base}_pairs.csv"
         report.write_pairs_csv(str(pairs_path), pairs, employees)
@@ -264,7 +265,7 @@ if __name__ == "__main__":
 
         # ---- Анти-соло счётчик (по месяцу) ----
         # считаем «соло-дни» в этом месяце и накапливаем «соло-месяцы»
-        solo_days = cov.solo_days_by_employee(schedule, gen.code_of)
+        solo_days = analytics.solo_days_by_employee(schedule, gen.code_of)
         solo_emp_ids = {eid for eid, cnt in solo_days.items() if cnt > 0}
         for e in employees:
             if e.id in solo_emp_ids:

@@ -6,15 +6,15 @@ from typing import Dict, List, Tuple, Optional
 from glob import glob
 import json
 
-from config import CONFIG as BASE_CONFIG
-from generator import Generator, Assignment
-from production_calendar import ProductionCalendar
-import report
-import pairing
-import balancer
-import postprocess
-import validator
-import coverage as cov
+from engine.domain.schedule import Assignment
+from engine.infrastructure.config import CONFIG as BASE_CONFIG
+from engine.infrastructure.production_calendar import ProductionCalendar
+from engine.presentation import report
+from engine.services import analytics
+from engine.services import balancing as balancer
+from engine.services import postprocess
+from engine.services import validation as validator
+from engine.services.generator import Generator
 
 # ---------------------------------------------------------------------------
 # Вспомогательные утилиты
@@ -157,7 +157,7 @@ def extract_tail(schedule, employees, gen: Generator) -> Dict[str, List[str]]:
 # Сценарии
 # ---------------------------------------------------------------------------
 
-SCENARIOS_DIR = Path(__file__).parent / "scenarios"
+SCENARIOS_DIR = Path(__file__).parent / "scenario_payloads"
 
 def _ensure_defaults(scn: dict) -> dict:
     """
@@ -347,7 +347,7 @@ def run_scenario(scn: dict, out_root: Path):
         baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
 
         # балансировка пар (safe-mode в начале месяца)
-        pairs_before = pairing.compute_pairs(schedule, gen.code_of)
+        pairs_before = analytics.compute_pairs(schedule, gen.code_of)
         pb_cfg = dict(cfg2.get("pair_breaking", {}) or {})
         prev_pairs_hint = scn.get("prev_pairs_for_month") or scn.get("prev_pairs") or prev_pairs_for_month or []
         pb_cfg.setdefault("prev_pairs", prev_pairs_hint)
@@ -422,7 +422,7 @@ def run_scenario(scn: dict, out_root: Path):
             norm_info,
         )
 
-        pairs_after = pairing.compute_pairs(schedule, gen.code_of)
+        pairs_after = analytics.compute_pairs(schedule, gen.code_of)
         pairs_path = out_dir / f"{base}_pairs.csv"
         report.write_pairs_csv(str(pairs_path), pairs_after, employees)
 
@@ -513,7 +513,7 @@ def run_scenario(scn: dict, out_root: Path):
         carry_in = carry_out
 
         # анти-соло счётчик: если в месяце были соло-дни — инкремент сотруднику
-        solo_days = cov.solo_days_by_employee(schedule, gen.code_of)
+        solo_days = analytics.solo_days_by_employee(schedule, gen.code_of)
         solo_emp_ids = {eid for eid, cnt in solo_days.items() if cnt > 0}
         for e in employees:
             if e.id in solo_emp_ids:
