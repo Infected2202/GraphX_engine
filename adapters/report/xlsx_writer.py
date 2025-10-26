@@ -4,18 +4,34 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font
+try:  # pragma: no cover - exercised in integration
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+except ImportError as exc:  # pragma: no cover - depends on environment
+    Workbook = None
+    Alignment = Font = None
+    _IMPORT_ERROR = exc
+else:  # pragma: no cover - imported when dependency present
+    _IMPORT_ERROR = None
 
 from domain.models import Employee
 from domain.schedule import Schedule
 
 
-HEADER_FONT = Font(bold=True)
-CENTER = Alignment(horizontal="center", vertical="center")
+class XLSXExportUnavailable(RuntimeError):
+    """Raised when Excel export cannot run due to missing dependencies."""
+
+
+HEADER_FONT = Font(bold=True) if Font else None
+CENTER = Alignment(horizontal="center", vertical="center") if Alignment else None
 
 
 def write_grid(path: str | Path, schedule: Schedule, employees: Sequence[Employee], *, title: str | None = None) -> Path:
+    if Workbook is None:
+        raise XLSXExportUnavailable(
+            "openpyxl is required for Excel export. Install 'openpyxl' to enable XLSX reports."
+        ) from _IMPORT_ERROR
+
     wb = Workbook()
     ws = wb.active
     ws.title = title or "Schedule"
