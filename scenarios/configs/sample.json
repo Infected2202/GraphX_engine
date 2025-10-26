@@ -1,0 +1,24 @@
+{
+  "shift_types": {
+    "day_a": {"code": "DA", "office": "A", "hours": 12, "is_working": true, "label": "Day A"},
+    "night_a": {"code": "NA", "office": "A", "hours": 12, "is_working": true, "label": "Night A"},
+    "off": {"code": "OFF", "office": null, "hours": 0, "is_working": false, "label": "Off"},
+    "vacation": {"code": "VAC8", "office": null, "hours": 8, "is_working": false, "label": "Vacation"}
+  },
+  "default_pattern": ["day_a", "night_a", "off", "off"],
+  "shortener": {"max_hours": 11},
+  "balancer": {"night_overlap_threshold": 2},
+  "employees": [
+    {"id": "E01", "name": "Alice"},
+    {"id": "E02", "name": "Bob"},
+    {"id": "E03", "name": "Carol"}
+  ],
+  "months": [
+    {
+      "month": "2024-01",
+      "pattern": ["day_a", "night_a", "off", "off"],
+      "rotation": {"E02": 1, "E03": 2},
+      "vacations": {"E01": ["2024-01-05"], "E02": ["2024-01-10"]}
+    }
+  ]
+}
