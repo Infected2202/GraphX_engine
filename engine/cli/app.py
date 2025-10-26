@@ -1,16 +1,18 @@
 from datetime import date
 from pathlib import Path
 from typing import List
-from config import CONFIG
-from generator import Generator, Assignment
-from production_calendar import ProductionCalendar
-import report
-import pairing
-import balancer
-import postprocess
-import validator
-import coverage as cov
 import os
+
+from engine.domain.schedule import Assignment
+from engine.infrastructure.config import CONFIG
+from engine.infrastructure.production_calendar import ProductionCalendar
+from engine.presentation import report
+from engine.services.generator import Generator
+from engine.services import pairing
+from engine.services import balancer
+from engine.services import postprocess
+from engine.services import validator
+from engine.services import coverage as cov
 
 if __name__ == "__main__":
     calendar = ProductionCalendar.load_default()

@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from production_calendar import ProductionCalendar
+from engine.domain.employee import Employee
+from engine.domain.schedule import Assignment
+from engine.domain.shift import ShiftType
+from engine.infrastructure.production_calendar import ProductionCalendar
 
 
 @dataclass
@@ -21,7 +24,7 @@ class ShiftShortener:
     def __init__(
         self,
         calendar: Optional[ProductionCalendar],
-        shift_types: Dict[str, "ShiftType"],
+        shift_types: Dict[str, ShiftType],
         code_of,
         config: ShorteningConfig,
     ) -> None:
@@ -32,8 +35,8 @@ class ShiftShortener:
 
     def apply(
         self,
-        employees: List["Employee"],
-        schedule: Dict[date, List["Assignment"]],
+        employees: List[Employee],
+        schedule: Dict[date, List[Assignment]],
         norm_month: int,
         ym: str,
         monthly_allowance: int,
@@ -66,7 +69,7 @@ class ShiftShortener:
         coverage_state = self._build_coverage_state(schedule)
         operations: List[Dict[str, object]] = []
 
-        def yearly_ok(emp: "Employee", new_hours: int) -> bool:
+        def yearly_ok(emp: Employee, new_hours: int) -> bool:
             overtime = max(0, new_hours - norm_month)
             return (emp.ytd_overtime + overtime) <= yearly_cap if yearly_cap else True
 
@@ -76,7 +79,7 @@ class ShiftShortener:
             if (monthly_cap and hours_by_emp[emp.id] <= monthly_cap) and yearly_ok(emp, hours_by_emp[emp.id]):
                 continue
 
-            candidates: List[Tuple[date, "Assignment"]] = []
+            candidates: List[Tuple[date, Assignment]] = []
             for dt in sorted(schedule.keys()):
                 if dt not in eligible_dates:
                     continue
@@ -173,7 +176,7 @@ class ShiftShortener:
             return self.calendar.allows_shortening(dt)
         return dt.weekday() >= 5
 
-    def _build_coverage_state(self, schedule: Dict[date, List["Assignment"]]) -> Dict[date, Dict[str, int]]:
+    def _build_coverage_state(self, schedule: Dict[date, List[Assignment]]) -> Dict[date, Dict[str, int]]:
         state: Dict[date, Dict[str, int]] = {}
         for dt, rows in schedule.items():
             cov = {"morning": 0, "evening": 0}
@@ -198,7 +201,7 @@ class ShiftShortener:
 
     def _choose_short_shift(
         self,
-        assignment: "Assignment",
+        assignment: Assignment,
         coverage: Dict[str, int],
     ) -> Optional[Tuple[str, str, Dict[str, int]]]:
         current_code = self.code_of(assignment.shift_key).upper()

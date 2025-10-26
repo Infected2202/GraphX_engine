@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 from datetime import date
 import copy
-import shifts_ops
-import pairing
-import coverage as cov
+
+from engine.domain.employee import Employee
+from engine.domain.schedule import Assignment
+from engine.services import shifts_ops
+from engine.services import pairing
+from engine.services import coverage as cov
 
 DAYC = {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}
 
@@ -160,8 +163,8 @@ def _same_office_overlap_month(schedule, code_of, emp_a: str, emp_b: str) -> int
 
 
 def apply_pair_breaking(
-    schedule,
-    employees,
+    schedule: Dict[date, List[Assignment]],
+    employees: List[Employee],
     code_of,
     cfg,
 ) -> Tuple[object, List[str], Dict[str, int], int, int, List[str]]:
