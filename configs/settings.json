@@ -1,0 +1,9 @@
+{
+  "coverage": {
+    "require_day_a": 0,
+    "require_day_b": 0
+  },
+  "pair_breaking": {
+    "enabled": false
+  }
+}

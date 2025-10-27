@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Settings</h2>
+  <pre class="json-view">{{ settings | tojson(indent=2) }}</pre>
+{% endblock %}

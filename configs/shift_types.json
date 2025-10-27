@@ -1,0 +1,7 @@
+{
+  "DA": {"label": "Day A", "css_class": "DA", "bg_color": "#F5F5F5", "text_color": "#111"},
+  "DB": {"label": "Day B", "css_class": "DB", "bg_color": "#F0F8FF", "text_color": "#111"},
+  "NA": {"label": "Night A", "css_class": "NA", "bg_color": "#CCE5FF", "text_color": "#111"},
+  "NB": {"label": "Night B", "css_class": "NB", "bg_color": "#CCE5FF", "text_color": "#111"},
+  "OFF": {"label": "Off", "css_class": "OFF", "bg_color": "#EEE", "text_color": "#666"}
+}

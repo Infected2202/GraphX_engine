@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Shift Types</h2>
+  <pre class="json-view">{{ shift_types | tojson(indent=2) }}</pre>
+{% endblock %}

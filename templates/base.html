@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>GraphX Engine Web</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <h1>GraphX Engine</h1>
+        <nav>
+          <a href="{{ url_for('editor.editor_page') }}">Editor</a>
+          <a href="{{ url_for('employees.employees_page') }}">Employees</a>
+          <a href="{{ url_for('calendar.calendar_page') }}">Calendar</a>
+          <a href="{{ url_for('shifts.shifts_page') }}">Shift Types</a>
+          <a href="{{ url_for('reports.reports_page') }}">Reports</a>
+          <a href="{{ url_for('settings.settings_page') }}">Settings</a>
+        </nav>
+      </aside>
+      <main class="main-content">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </body>
+</html>

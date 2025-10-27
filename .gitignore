@@ -1,4 +1,8 @@
 __pycache__/
-combine_scenarios_grid.py
-combine_scenarios.py
-md.md
+*.pyc
+.env
+.venv/
+instance/
+pytest_cache/
+*.sqlite
+output/

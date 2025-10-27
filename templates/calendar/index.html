@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Calendar Days</h2>
+  <table class="table-grid">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Type</th>
+        <th>Norm (minutes)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for day in days %}
+        <tr>
+          <td>{{ day.date }}</td>
+          <td>{{ day.day_type }}</td>
+          <td>{{ day.norm_minutes or '-' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Vacations</h2>
+  <table class="table-grid">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Employee</th>
+        <th>Start</th>
+        <th>End</th>
+        <th>Kind</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for vac in vacations %}
+        <tr>
+          <td>{{ vac.id }}</td>
+          <td>{{ vac.emp_id }}</td>
+          <td>{{ vac.start_date }}</td>
+          <td>{{ vac.end_date }}</td>
+          <td>{{ vac.kind }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

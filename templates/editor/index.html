@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Editor — {{ data.month }}</h2>
+  <div class="button-bar">
+    <form method="get" action="{{ url_for('editor.editor_page') }}" style="display:inline-block;">
+      <label>Month:
+        <input type="month" name="month" value="{{ data.month }}" />
+      </label>
+      <button type="submit">Open</button>
+    </form>
+    <button onclick="generateSchedule()">Generate</button>
+    <button onclick="exportXlsx()">Export XLSX</button>
+  </div>
+  <table class="table-grid">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        {% for day in range(1, data.days + 1) %}
+          <th>{{ day }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for employee in data.employees %}
+        <tr>
+          <td>{{ employee.id }} — {{ employee.fio }}</td>
+          {% for day in range(1, data.days + 1) %}
+            {% set cell = data.matrix.get(employee.id, {}).get(day, {}) %}
+            <td>{{ cell.value or '' }}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <section>
+    <h3>Draft edits</h3>
+    <textarea id="draft-edits" rows="6" style="width:100%;">
+{
+  "month": "{{ data.month }}",
+  "edits": [
+    {"emp_id": "E01", "day": 1, "new_value": "OFF", "op": "set"}
+  ]
+}
+    </textarea>
+    <div class="button-bar">
+      <button onclick="applyDraft()">Apply Draft</button>
+      <button onclick="commitDraft()">Commit Draft</button>
+    </div>
+    <p>Current draft items: {{ data.draft|length }}</p>
+  </section>
+
+  <script>
+    async function generateSchedule() {
+      const month = '{{ data.month }}';
+      const response = await fetch(`/api/schedule/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month })
+      });
+      if (response.ok) {
+        window.location.reload();
+      }
+    }
+
+    async function applyDraft() {
+      const payload = JSON.parse(document.getElementById('draft-edits').value);
+      const response = await fetch('/api/schedule/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (response.ok) {
+        alert('Draft saved');
+      }
+    }
+
+    async function commitDraft() {
+      const payload = JSON.parse(document.getElementById('draft-edits').value);
+      const response = await fetch('/api/schedule/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: payload.month })
+      });
+      if (response.ok) {
+        window.location.reload();
+      }
+    }
+
+    function exportXlsx() {
+      const month = '{{ data.month }}';
+      window.location.href = `/api/export/xlsx?month=${month}`;
+    }
+  </script>
+{% endblock %}

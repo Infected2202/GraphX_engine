@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Reports — Hours</h2>
+  <p>Month: {{ month }}</p>
+  <table class="table-grid">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>Hours</th>
+        <th>Days</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for emp_id, data in report.employees.items() %}
+        <tr>
+          <td>{{ emp_id }}</td>
+          <td>{{ data.hours }}</td>
+          <td>{{ data.days }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>Office totals</h3>
+  <table class="table-grid">
+    <thead>
+      <tr>
+        <th>Office</th>
+        <th>Hours</th>
+        <th>Days</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for office, data in report.offices.items() %}
+        <tr>
+          <td>{{ office }}</td>
+          <td>{{ data.hours }}</td>
+          <td>{{ data.days }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><a href="{{ url_for('reports.hours_csv', month=month) }}">Download CSV</a></p>
+{% endblock %}

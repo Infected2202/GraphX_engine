@@ -1,0 +1,71 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: #f6f8fa;
+}
+
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 220px;
+  background-color: #111827;
+  color: #f9fafb;
+  padding: 24px 16px;
+}
+
+.sidebar h1 {
+  font-size: 18px;
+  margin-bottom: 24px;
+}
+
+.sidebar nav a {
+  display: block;
+  color: #d1d5db;
+  text-decoration: none;
+  margin-bottom: 12px;
+}
+
+.sidebar nav a:hover {
+  color: #ffffff;
+}
+
+.main-content {
+  flex: 1;
+  padding: 24px;
+}
+
+.table-grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-grid th,
+.table-grid td {
+  border: 1px solid #d1d5db;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.table-grid th {
+  background-color: #e5e7eb;
+}
+
+.button-bar {
+  margin-bottom: 16px;
+}
+
+.button-bar button {
+  margin-right: 8px;
+  padding: 6px 12px;
+}
+
+pre.json-view {
+  background-color: #111827;
+  color: #f9fafb;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
