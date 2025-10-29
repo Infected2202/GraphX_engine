@@ -1,0 +1,13 @@
+{
+  "DA": {"label": "Day A", "css_class": "cell-da"},
+  "DB": {"label": "Day B", "css_class": "cell-db"},
+  "NA": {"label": "Night A", "css_class": "cell-na"},
+  "NB": {"label": "Night B", "css_class": "cell-nb"},
+  "OFF": {"label": "Выходной", "css_class": "cell-off"},
+  "M8A": {"label": "Укороченная A", "css_class": "cell-m8a"},
+  "M8B": {"label": "Укороченная B", "css_class": "cell-m8b"},
+  "E8A": {"label": "Вечерняя 8 A", "css_class": "cell-e8a"},
+  "E8B": {"label": "Вечерняя 8 B", "css_class": "cell-e8b"},
+  "VAC8": {"label": "Отпуск 8ч", "css_class": "cell-vac8"},
+  "VAC0": {"label": "Отпуск 0ч", "css_class": "cell-vac0"}
+}
