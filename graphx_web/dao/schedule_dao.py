@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 from . import db
 
@@ -42,3 +42,28 @@ def ensure_month_exists(ym: str) -> int:
     if month_id is None:
         raise MonthNotFoundError(f"Month {ym} is not present in the database")
     return month_id
+
+
+ScheduleCellPayload = Tuple[int, int, str, Optional[str], str]
+
+
+def replace_month_cells(month_id: int, cells: Iterable[ScheduleCellPayload]) -> None:
+    """Replace all schedule cells for a month with the provided payload."""
+
+    connection = db.get_db()
+    connection.execute("DELETE FROM schedule_cells WHERE month_id = ?", (month_id,))
+
+    batch = [
+        (month_id, emp_id, day, value, office, meta_json)
+        for emp_id, day, value, office, meta_json in cells
+    ]
+    if batch:
+        connection.executemany(
+            """
+            INSERT INTO schedule_cells (month_id, emp_id, day, value, office, meta_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            batch,
+        )
+
+    connection.commit()

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, jsonify, render_template, request
 
-from ...services import schedule_service
+from ...services import generator_adapter, schedule_service
+from ...dao import schedule_dao
 
 bp = Blueprint("editor", __name__)
 
@@ -36,4 +37,40 @@ def editor_index():
         selected_month=selected_month,
         month_view=month_view,
         error_message=error,
+    )
+
+
+@bp.post("/api/schedule/generate")
+def generate_schedule():
+    payload = request.get_json(silent=True) or {}
+    month_value = payload.get("month") or request.args.get("month")
+    if not month_value:
+        return jsonify({"error": "Не указан месяц"}), 400
+
+    try:
+        month = schedule_service.parse_month(month_value)
+    except schedule_service.InvalidMonthFormatError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        schedule_service.ensure_month_available(month)
+    except schedule_dao.MonthNotFoundError:
+        return jsonify({"error": f"Месяц {month} отсутствует в базе"}), 404
+
+    try:
+        stats = generator_adapter.generate_and_store(month)
+    except generator_adapter.GenerationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "month": stats.ym,
+                "employees": stats.employees,
+                "days": stats.days,
+                "cells": stats.cells,
+            }
+        ),
+        200,
     )
