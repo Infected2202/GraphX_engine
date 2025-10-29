@@ -208,14 +208,13 @@ def apply_pair_breaking(
     cur_sched = copy.deepcopy(schedule)
     ordered_dates = sorted(cur_sched.keys())
 
-    base_pairs_hours = pairing.pair_hours_exclusive(
+    _base_pairs_hours = pairing.pair_hours_exclusive(
         cur_sched,
         code_of,
         prev_pairs,
         threshold_day=threshold_day,
         skip_ids=intern_ids,
     )
-    base_score = sum(item[4] for item in base_pairs_hours)
 
     prev_exclusive = pairing.exclusive_matching_by_day(prev_pairs or [], threshold_day=threshold_day)
     prev_exclusive = [
@@ -356,8 +355,6 @@ def apply_pair_breaking(
                 ops_log.append(f"  tape.after : {_fmt_tape(test_sched, code_of, minus_emp, w0, w1)}")
                 cur_sched = test_sched
                 ordered_dates = sorted(cur_sched.keys())
-                base_pairs_hours = after_pairs
-                base_score = sum(item[4] for item in base_pairs_hours)
                 ops += 1
                 moved.add(minus_emp)
                 pred_hours_cum += dHpred1
@@ -431,8 +428,6 @@ def apply_pair_breaking(
                 ops_log.append(f"  tape.after : {_fmt_tape(test_sched2, code_of, plus_emp, w0, w1)}")
                 cur_sched = test_sched2
                 ordered_dates = sorted(cur_sched.keys())
-                base_pairs_hours = after_pairs
-                base_score = sum(item[4] for item in base_pairs_hours)
                 ops += 1
                 moved.add(plus_emp)
                 pred_hours_cum += dHpred2
@@ -494,8 +489,6 @@ def apply_pair_breaking(
             if verdict == "ACCEPT":
                 cur_sched = flip_sched_d
                 ordered_dates = sorted(cur_sched.keys())
-                base_pairs_hours = after_pairs
-                base_score = sum(item[4] for item in base_pairs_hours)
                 ops += 1
                 moved.add(minus_emp)
                 continue
@@ -550,8 +543,6 @@ def apply_pair_breaking(
             if verdict == "ACCEPT":
                 cur_sched = flip_sched_n
                 ordered_dates = sorted(cur_sched.keys())
-                base_pairs_hours = after_pairs
-                base_score = sum(item[4] for item in base_pairs_hours)
                 ops += 1
                 moved.add(plus_emp)
                 continue

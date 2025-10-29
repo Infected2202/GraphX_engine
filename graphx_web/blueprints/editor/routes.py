@@ -28,11 +28,7 @@ def editor_index():
         error = f"Месяц {selected_month} отсутствует в базе."
         selected_month = months[-1] if months else None
 
-    month_view = (
-        schedule_service.build_month_view(selected_month)
-        if selected_month
-        else None
-    )
+    month_view = schedule_service.build_month_view(selected_month) if selected_month else None
 
     return render_template(
         "editor/index.html",

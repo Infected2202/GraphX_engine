@@ -43,9 +43,12 @@ def deep_copy_config(cfg: dict) -> dict:
     out["months"] = months_copy
     out["employees"] = [dict(e) for e in cfg["employees"]]
     out["shift_types"] = {k: dict(v) for k, v in cfg["shift_types"].items()}
-    if "logging" in out: out["logging"] = dict(out["logging"])
-    if "pair_breaking" in out: out["pair_breaking"] = dict(out["pair_breaking"])
-    if "coverage" in out: out["coverage"] = dict(out["coverage"])
+    if "logging" in out:
+        out["logging"] = dict(out["logging"])
+    if "pair_breaking" in out:
+        out["pair_breaking"] = dict(out["pair_breaking"])
+    if "coverage" in out:
+        out["coverage"] = dict(out["coverage"])
     return out
 
 def filter_employees(cfg: dict, keep_ids: List[str]) -> dict:
@@ -118,7 +121,8 @@ def aggregate_effective_vacations(cfg_months: List[dict], current_ym: str, gen: 
     for ms in cfg_months:
         vac = ms.get("vacations", {}) or {}
         for eid, dates in vac.items():
-            if eid not in current_emp_ids: continue
+            if eid not in current_emp_ids:
+                continue
             for dt in dates:
                 if d0 <= dt <= d1:
                     eff.setdefault(eid, []).append(dt)
@@ -352,7 +356,6 @@ def run_scenario(scn: dict, out_root: Path):
         baseline_issues = validator.validate_baseline(ym, employees, schedule, gen.code_of, gen=None, ignore_vacations=True)
 
         # балансировка пар (safe-mode в начале месяца)
-        pairs_before = pairing.compute_pairs(schedule, gen.code_of)
         pb_cfg = dict(cfg2.get("pair_breaking", {}) or {})
         prev_pairs_hint = scn.get("prev_pairs_for_month") or scn.get("prev_pairs") or prev_pairs_for_month or []
         pb_cfg.setdefault("prev_pairs", prev_pairs_hint)

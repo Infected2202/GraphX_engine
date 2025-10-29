@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from flask import Flask
+from flask import Flask, redirect, url_for
+from flask.typing import ResponseReturnValue
 
 from .dao import db as db_module
 from .blueprints.editor.routes import bp as editor_bp
@@ -43,6 +44,10 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     db_module.ensure_schema(app)
 
     app.register_blueprint(editor_bp)
+
+    @app.get("/")
+    def index() -> ResponseReturnValue:
+        return redirect(url_for("editor.editor_index"))
 
     @app.get("/healthz")
     def healthcheck() -> tuple[str, int]:

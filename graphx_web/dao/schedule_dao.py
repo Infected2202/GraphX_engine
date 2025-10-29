@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from . import db
 
@@ -13,17 +13,13 @@ class MonthNotFoundError(Exception):
 
 def get_month_id(ym: str) -> Optional[int]:
     connection = db.get_db()
-    row = connection.execute(
-        "SELECT id FROM months WHERE ym = ?", (ym,)
-    ).fetchone()
+    row = connection.execute("SELECT id FROM months WHERE ym = ?", (ym,)).fetchone()
     return int(row["id"]) if row else None
 
 
 def list_months() -> List[str]:
     connection = db.get_db()
-    rows = connection.execute(
-        "SELECT ym FROM months ORDER BY ym"
-    ).fetchall()
+    rows = connection.execute("SELECT ym FROM months ORDER BY ym").fetchall()
     return [row["ym"] for row in rows]
 
 

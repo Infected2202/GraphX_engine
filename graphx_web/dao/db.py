@@ -68,9 +68,7 @@ def _has_version(db: sqlite3.Connection, version: str) -> bool:
     )
     if cursor.fetchone() is None:
         return False
-    version_cursor = db.execute(
-        "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
-    )
+    version_cursor = db.execute("SELECT 1 FROM schema_migrations WHERE version = ?", (version,))
     return version_cursor.fetchone() is not None
 
 
