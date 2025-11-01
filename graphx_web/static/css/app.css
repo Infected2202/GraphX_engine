@@ -1,0 +1,229 @@
+:root {
+  --color-background: #f4f6fb;
+  --color-surface: #ffffff;
+  --color-border: #d9deeb;
+  --color-text: #1a1f2b;
+  --color-accent: #2b6cb0;
+  --color-alert: #c53030;
+  --cell-even: #edf2fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Roboto", sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-text);
+}
+
+.app-header {
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.app-nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--color-text);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+
+.nav-link:hover,
+.nav-link--active {
+  background-color: var(--color-accent);
+  color: #fff;
+}
+
+.app-main {
+  padding: 2rem;
+}
+
+.editor-header {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.month-selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.month-selector__label {
+  font-weight: 600;
+}
+
+.month-selector__select {
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.25rem;
+  min-width: 8rem;
+}
+
+.button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.25rem;
+  background-color: var(--color-accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:hover {
+  opacity: 0.9;
+}
+
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: 0.25rem;
+  border: 1px solid transparent;
+}
+
+.alert--error {
+  background-color: #fed7d7;
+  border-color: #feb2b2;
+  color: var(--color-alert);
+}
+
+.editor-grid {
+  background-color: var(--color-surface);
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.section-title {
+  margin: 0 0 1rem;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.schedule-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 40rem;
+}
+
+.schedule-table__header {
+  padding: 0.5rem;
+  text-align: center;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  font-weight: 600;
+}
+
+.schedule-table__header--employee {
+  text-align: left;
+  min-width: 12rem;
+}
+
+.schedule-table__employee {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-background);
+  text-align: left;
+  font-weight: 600;
+  position: sticky;
+  left: 0;
+  background-clip: padding-box;
+}
+
+.schedule-table__cell {
+  min-width: 4rem;
+  border: 1px solid var(--color-border);
+  padding: 0.4rem 0.3rem;
+  text-align: center;
+}
+
+.schedule-table__cell:nth-child(even) {
+  background-color: var(--cell-even);
+}
+
+.schedule-table__cell--empty {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.cell-value {
+  display: inline-block;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.cell-value--empty {
+  font-weight: 400;
+}
+
+.cell-off {
+  background-color: #f7fafc;
+  color: #4a5568;
+}
+
+.cell-da {
+  background-color: #ebf8ff;
+  color: #2c5282;
+}
+
+.cell-db {
+  background-color: #ede9fe;
+  color: #553c9a;
+}
+
+.cell-na,
+.cell-nb {
+  background-color: #ebf4ff;
+  color: #1a365d;
+}
+
+.cell-m8a,
+.cell-m8b,
+.cell-e8a,
+.cell-e8b {
+  background-color: #fffaf0;
+  color: #b7791f;
+}
+
+.cell-vac8,
+.cell-vac0 {
+  background-color: #f0fff4;
+  color: #2f855a;
+}
+
+.office-a {
+  border-bottom: 2px solid #2b6cb0;
+}
+
+.office-b {
+  border-bottom: 2px solid #805ad5;
+}
+
+.empty-state {
+  margin-top: 2rem;
+  font-style: italic;
+  color: #4a5568;
+}

@@ -1,0 +1,58 @@
+{% extends "_layout.html" %}
+
+{% block title %}Редактор расписания{% endblock title %}
+
+{% block content %}
+<section class="editor-header">
+  <form method="get" action="{{ url_for('editor.editor_index') }}" class="month-selector">
+    <label for="month" class="month-selector__label">Месяц:</label>
+    <select id="month" name="month" class="month-selector__select">
+      {% for month in months %}
+        <option value="{{ month }}"{% if month == selected_month %} selected{% endif %}>{{ month }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="button">Показать</button>
+  </form>
+  {% if error_message %}
+    <div class="alert alert--error">{{ error_message }}</div>
+  {% endif %}
+</section>
+
+{% if month_view %}
+  <section class="editor-grid">
+    <h2 class="section-title">{{ month_view.ym }}</h2>
+    <div class="table-wrapper">
+      <table class="schedule-table">
+        <thead>
+          <tr>
+            <th class="schedule-table__header schedule-table__header--employee">Сотрудник</th>
+            {% for day in month_view.days %}
+              <th class="schedule-table__header">{{ day }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for employee in month_view.employees %}
+            <tr>
+              <th class="schedule-table__employee">{{ employee.fio }}</th>
+              {% set cell_map = month_view.cells.get(employee.id, {}) %}
+              {% for day in month_view.days %}
+                {% set cell = cell_map.get(day) %}
+                <td class="schedule-table__cell {% if cell %}{{ cell.css_class }}{% else %}schedule-table__cell--empty{% endif %}">
+                  {% if cell %}
+                    <span class="cell-value">{{ cell.display }}</span>
+                  {% else %}
+                    <span class="cell-value cell-value--empty">—</span>
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% else %}
+  <p class="empty-state">Для выбранного месяца нет данных в расписании.</p>
+{% endif %}
+{% endblock content %}

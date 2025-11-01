@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}GraphX Editor{% endblock title %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+    {% block extra_head %}{% endblock extra_head %}
+  </head>
+  <body>
+    <header class="app-header">
+      <h1 class="app-title">GraphX — расписание смен</h1>
+      <nav class="app-nav">
+        <a href="{{ url_for('editor.editor_index') }}" class="nav-link{% if request.endpoint == 'editor.editor_index' %} nav-link--active{% endif %}">Редактор</a>
+      </nav>
+    </header>
+    <main class="app-main">
+      {% block content %}{% endblock content %}
+    </main>
+    <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+  </body>
+</html>

@@ -3,7 +3,6 @@ from datetime import date
 from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
 import csv
 import os
-from collections import defaultdict
 
 from engine.services import pairing
 

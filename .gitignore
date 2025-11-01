@@ -2,3 +2,5 @@ __pycache__/
 combine_scenarios_grid.py
 combine_scenarios.py
 md.md
+instance/
+*.sqlite

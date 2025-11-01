@@ -10,8 +10,10 @@ from datetime import date
 
 def _tok(code: str) -> str:
     c = (code or "").upper()
-    if c in {"DA","DB","M8A","M8B","E8A","E8B"}: return "D"
-    if c in {"NA","NB","N4A","N4B","N8A","N8B"}: return "N"
+    if c in {"DA", "DB", "M8A", "M8B", "E8A", "E8B"}:
+        return "D"
+    if c in {"NA", "NB", "N4A", "N4B", "N8A", "N8B"}:
+        return "N"
     return "O"
 
 
